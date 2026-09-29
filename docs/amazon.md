@@ -109,24 +109,36 @@ classification** -- elevated NDVI amplitude with a recurring within-year
 dip is *consistent with* deciduous/semi-deciduous behavior, but confirming
 it would need ground reference data this project doesn't have.
 
-Each figure now also shows an 80x80px RGB zoom (January of each year, exact
-pixel marked with a red crosshair) above its NDVI panel, specifically to
-ground-truth what's being measured -- and it surfaced a real caveat, visible
-consistently across all four pixels: **the two low-amplitude pixels
-(`evergreen_like`, `typical`) both sit solidly inside a large, uniform
-forest interior in every year's zoom, while both higher-amplitude pixels
-(`elevated_amplitude`, `deciduous_candidate`) sit right at the boundary
-between dense forest and this tile's lower-NDVI tan/beige land-cover type**
-(a green patch against a lighter background in both figures' zoom rows).
-That's not proof of anything on its own (n=4, hand-inspected), but it's a
-real, unresolved ambiguity worth stating plainly: elevated NDVI amplitude
-at an edge pixel could reflect genuine deciduous phenology, *or* it could
-be a boundary/mixed-pixel effect (the 4.77m footprint spanning two
-different covers, with sub-pixel misregistration between months shifting
-how much of each cover falls inside the pixel) that has nothing to do with
-leaf phenology at all. The amplitude-based selection used here can't
-distinguish the two; doing so would need either finer-resolution imagery,
-an explicit edge/interior mask before ranking candidates, or checking
+Each figure shows a tight (30x30px, ~143m) RGB zoom, exact pixel marked
+with a red crosshair, for **all 12 months of the single year with the most
+confidently-clear observations at that pixel** (not just January -- the
+point is to see the canopy actually change month to month), plus a
+green/gray border per month flagging whether that observation was
+confidently clear. This ground-truthing surfaced a real caveat, and the
+tighter zoom (an earlier pass used a looser 80x80px crop) sharpened it into
+a genuine gradient rather than a rough two-bucket split: **NDVI amplitude
+here tracks distance to the forest/non-forest boundary almost monotonically**.
+`evergreen_like` and `typical` (the two lowest-amplitude picks) show zero
+trace of the tile's lower-NDVI tan/beige land cover in any of their 12
+months -- solid forest interior throughout. `elevated_amplitude` has that
+tan cover visible in-frame, but with a clear margin of pure forest between
+it and the marked pixel. `deciduous_candidate` (the highest-amplitude pick)
+sits *immediately on* the boundary in every single month -- and tellingly,
+**the tan patch's shape is essentially identical across all 12 months**,
+which looks far more like a static, non-seasonal land-cover boundary than
+leaves dropping and regrowing on a deciduous crown.
+
+That's anecdotal (n=4, hand-inspected, one tile), but it's a real,
+unresolved ambiguity worth stating plainly rather than the more flattering
+read: elevated NDVI amplitude at an edge pixel could reflect genuine
+deciduous phenology, *or* it could be a boundary/mixed-pixel effect (the
+4.77m footprint spanning two different covers, with sub-pixel
+misregistration between months shifting how much of each cover falls
+inside the pixel) that has nothing to do with leaf phenology at all. Given
+the static tan-patch shape, the latter looks more likely for this specific
+pixel. The amplitude-based selection used here can't distinguish the two;
+doing so would need either finer-resolution imagery, an explicit
+edge/interior mask before ranking candidates, or checking
 whether the recurring dip's timing matches known deciduous phenology for
 this region -- none of which this project has done.
 
