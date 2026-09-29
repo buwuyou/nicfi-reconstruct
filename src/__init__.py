@@ -1,0 +1,1 @@
+"""NICFI monthly cloud-free reconstruction pipeline."""

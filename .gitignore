@@ -1,0 +1,12 @@
+# Regenerable, large per-site outputs -- rerun the scripts in scripts/<site>/
+# against the same source data to reproduce. Figures (outputs/<site>/figures/)
+# are the only outputs/ content tracked in git.
+outputs/*/cache/
+outputs/*/reconstructed/
+outputs/*/reconstructed_v2/
+outputs/*/annual/
+
+# Python
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
