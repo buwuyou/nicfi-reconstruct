@@ -56,6 +56,88 @@ different failure mode than the Vietnam haze case (see `docs/vietnam.md`,
 which was non-recurring at a given location) and isn't fixed by that
 work — flagged, not solved, here.
 
+## Annual composite: per calendar year (5 years, not 1)
+
+Unlike Vietnam (a single year, where "annual composite" and "the
+reconstructed stack" were the same thing), this site has 5 calendar years
+of monthly data, so an annual composite here means one composite *per
+year* — run via `scripts/amazon/03_annual_composite.py`, same method as
+`src/annual_composite.py` (naive / robust / medoid).
+
+This is a much sharper test of the naive-vs-robust problem than Vietnam
+ever produced. Vietnam's AOI never dropped below 5/12 confidently-clear
+months for any pixel; here, **every single year has pixels with literally
+zero confidently-clear months** (2021: 1797 px, 0.041%; 2025: 3657 px,
+0.083% -- worth noting 2025 has *more* zero-coverage pixels than 2021
+despite 2021 looking cloudier in aggregate, because this is about whether
+a given pixel ever gets one lucky clear glimpse, not overall cloudiness).
+
+At those pixels the naive median is **undefined** -- not just noisy or
+biased, literally NaN, rendered as black holes in
+`08_annual_naive_undefined_zoom.png`. The robust composite has no such
+gaps anywhere, by construction (every month contributes at least
+`recon_trust=0.35` weight, so there's always something to compute a
+percentile from). `06_annual_composite_by_year.png` shows all 5 years
+side by side with their `n_valid` maps -- 2021 and 2025 visibly have the
+patchiest coverage, matching the two years with real contamination spikes
+in `01_contamination_timeseries.png`.
+
+## NDVI phenology at forest pixels (deciduous-mapping relevance)
+
+This site's stated downstream use is mapping deciduous trees within the
+forest, which lives or dies on whether the reconstruction preserves real
+seasonal NDVI signal rather than smoothing it into the generic cluster
+curve — the exact risk flagged early in this project for confusable/rare
+classes. `scripts/amazon/04_deciduous_ndvi.py` checks this directly:
+
+1. **"Forest"** = mean NDVI (confidently-clear months only) > 0.6, which
+   cleanly separates dense canopy from this tile's lower-NDVI non-forest
+   (open water, wetland/campina, bare ground) -- picked from the actual
+   distribution (median 0.66, most of the mass above 0.6).
+2. **Seasonal amplitude** = mean annual (max NDVI − min NDVI) of the
+   *reconstructed* series (gap-free, so amplitude isn't itself an artifact
+   of missing data) per forest pixel, averaged over 5 years.
+3. Four pixels picked at amplitude percentiles 10/50/90/98 among forest
+   pixels with strong data support (≥45/60 confidently-clear months), so
+   the amplitude estimate is trustworthy rather than a sparse-data fluke.
+   `09_ndvi_pixel_locations.png` shows the amplitude map has real spatial
+   coherence (patches, not salt-and-pepper noise) -- evidence it's tracking
+   a genuine property of the forest, not sensor noise.
+
+This is a **diagnostic proxy for deciduousness, not a species-level
+classification** -- elevated NDVI amplitude with a recurring within-year
+dip is *consistent with* deciduous/semi-deciduous behavior, but confirming
+it would need ground reference data this project doesn't have.
+
+**Result, per pixel** (`10_ndvi_evergreen_like.png` through
+`13_ndvi_deciduous_candidate.png`, raw/masked/reconstructed NDVI, one panel
+per year):
+
+- **evergreen_like** and **typical**: flat NDVI (~0.78-0.85) across all 5
+  years, with a handful of sharp downward spikes in the raw series (clear
+  cloud/shadow contamination) that are correctly absent from the masked
+  points and correctly ignored by the reconstruction, which stays flat.
+- **elevated_amplitude**: a real, consistent within-year cycle repeating
+  across all 5 independent years (low Jan-Mar, peak Jun-Aug) — not noise,
+  since most months are confidently observed (dense orange markers) and
+  the pattern recurs at the same calendar position every year.
+- **deciduous_candidate**: the strongest and most textbook pattern — a
+  recurring Feb-Mar dip in 4 of 5 years, again mostly built from real
+  confidently-clear observations rather than reconstructed gaps, with the
+  reconstruction correctly preserving the dip shape while still catching
+  genuine one-off outliers (e.g. a clear cloud-contaminated spike in
+  Oct 2025, pulled back toward the seasonal pattern rather than left in).
+
+The reassuring finding: at both high-amplitude pixels, the recurring shape
+is present *in the real observations themselves* (confidently-clear months
+directly show the dip/peak), and the reconstruction tracks it rather than
+erasing it — i.e. for these two pixels at least, the phenology model is
+not flattening genuine seasonal signal into the generic cluster curve.
+This doesn't fully retire the earlier concern (a pixel with much sparser
+real data than these two, selected specifically for good data support,
+could still be shrunk harder toward the cluster mean), but it's a positive
+data point rather than a purely theoretical worry.
+
 ## Figure index (`outputs/amazon/figures/`)
 
 - `00_sample_months.png` — initial visual survey used to sanity-check the
@@ -68,3 +150,14 @@ work — flagged, not solved, here.
   grids, all 60 months.
 - `05_phenology_*.png` — two 5-year pixel time series (low- and
   high-NDVI cluster examples) showing the seasonal curve fit.
+- `06_annual_composite_by_year.png` — naive/robust/medoid/n_valid, all 5
+  years.
+- `07_annual_n_valid_by_year.png` — per-year data-sufficiency boxplot.
+- `08_annual_naive_undefined_zoom.png` — naive median's literal undefined
+  (black) pixels vs. the robust median at the same location.
+- `09_ndvi_pixel_locations.png` — mean-NDVI and seasonal-amplitude maps
+  with the 4 selected forest pixels marked.
+- `10_ndvi_evergreen_like.png` / `11_ndvi_typical.png` /
+  `12_ndvi_elevated_amplitude.png` / `13_ndvi_deciduous_candidate.png` —
+  raw/masked/reconstructed monthly NDVI, one panel per year, for each
+  selected pixel.

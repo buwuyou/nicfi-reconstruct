@@ -29,7 +29,8 @@ test sites: **Vietnam** (mountains, 1 year, cropped AOI) and **Amazon**
 A 6th module, `src/annual_composite.py`, builds annual composites from the
 reconstructed monthly stack rather than raw sparse observations, so every
 pixel gets a comparable sample depth instead of the usual
-more-cloud-means-fewer-samples problem (Vietnam only so far).
+more-cloud-means-fewer-samples problem. Run on both sites (Vietnam: one
+year; Amazon: one composite per calendar year, 5 total).
 
 Design rationale, and two real bugs found/fixed while verifying results
 against actual images rather than trusting aggregate numbers, are in
@@ -55,6 +56,8 @@ python scripts/vietnam/04_annual_composite.py
 
 python scripts/amazon/01_process.py
 python scripts/amazon/02_visualize.py
+python scripts/amazon/03_annual_composite.py
+python scripts/amazon/04_deciduous_ndvi.py
 ```
 
 Environment: `sen2sr` conda env (torch, rasterio, omnicloudmask,
@@ -69,7 +72,15 @@ scikit-learn).
 - **Amazon**: `outputs/amazon/figures/02_before_after_highlights.png` —
   even a 97%-contaminated month (Jul 2021) reconstructs into plausible
   terrain. One genuine unfixed limitation found here (recurring localized
-  haze that the detector's own reference absorbs): `docs/amazon.md`.
+  haze that the detector's own reference absorbs): `docs/amazon.md`. Its
+  5-year annual composite also gives the sharpest evidence yet for why the
+  robust method matters: the naive median is literally undefined (black
+  holes) at ~0.04-0.08% of pixels each year, versus zero gaps for the
+  robust/medoid versions (`08_annual_naive_undefined_zoom.png`). Per-pixel
+  NDVI phenology checks (`10-13_ndvi_*.png`), relevant to this site's
+  deciduous-tree-mapping use case, found real recurring seasonal dips in
+  high-amplitude forest pixels that the reconstruction preserves rather
+  than smoothing away — see `docs/amazon.md`.
 
 ## Honest limitations
 
@@ -82,7 +93,6 @@ scikit-learn).
   event (e.g. clear-cut) in a cloudy month gets smoothed over until a later
   clear observation updates the picture. This is a compositing method, not
   a change-detection method.
-- Annual compositing has only been run for Vietnam so far.
 - Both test sites are NICFI analytic 4-band products at the same
   resolution/processing level — a different sensor hasn't been tested.
 - Multi-frame super-resolution was investigated and deliberately not
