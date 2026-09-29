@@ -176,6 +176,41 @@ whether either pixel is actually showing deciduous behavior -- but it is a
 positive data point on the narrower question of whether real signal
 survives reconstruction, rather than a purely theoretical worry.
 
+## Unbiased check: 10 random dense-forest-interior pixels, no amplitude selection
+
+The amplitude-based selection above is a candidate-generation heuristic, not
+a validation -- picking the highest-amplitude pixels *by construction*
+finds whatever produces high amplitude, deciduous or not, and turned out to
+be confounded with forest-edge proximity. `scripts/amazon/05_random_forest_pixels.py`
+is the complementary check: 10 pixels chosen completely at random from
+**dense forest interior**, with no amplitude ranking involved at all.
+
+"Interior" here is stricter than the >0.6 NDVI threshold used above -- it
+requires the *entire* 30x30px neighborhood a figure would zoom into (not
+just the center pixel) to be forest, via binary erosion. That rules out the
+edge-proximity confound by construction rather than by post-hoc inspection:
+of 2,625,240 plain-forest pixels, only 1,019,057 (39%) qualify as interior
+by this stricter definition, and the 10 samples (seed=0) all land visibly
+deep inside solid canopy in `24_random_pixel_locations.png`.
+
+**Result**: all 10 (`14_ndvi_random_01.png` through `23_ndvi_random_10.png`)
+show the same pattern -- NDVI fluctuating noisily around a stable mean
+(commonly 0.75-0.85, varying by pixel), sharp cloud-contamination spikes in
+the raw series correctly absent from the masked points and correctly
+smoothed over by the reconstruction, and **no recurring within-year dip at
+a consistent calendar position across independent years** -- the specific
+signature that would distinguish real seasonal (deciduous-like) phenology
+from ordinary pixel-to-pixel noise. This is the expected outcome, not a
+failure of the method: if deciduous trees are genuinely rare within this
+forest (a few pixels here and there, as stated for this site), a random
+sample of 10 has a low chance of landing on one by chance. Combined with
+the amplitude-based result above, the honest overall picture is: this
+sampling exercise found one candidate signal, and it comes with a real,
+unresolved boundary-effect confound; it did not find an unambiguous
+interior-forest deciduous signal. Finding one, if it exists, likely needs
+either targeted search informed by other data (a known deciduous species'
+range/timing) or many more than 10 random samples.
+
 ## Figure index (`outputs/amazon/figures/`)
 
 - `00_sample_months.png` — initial visual survey used to sanity-check the
@@ -198,4 +233,8 @@ survives reconstruction, rather than a purely theoretical worry.
 - `10_ndvi_evergreen_like.png` / `11_ndvi_typical.png` /
   `12_ndvi_elevated_amplitude.png` / `13_ndvi_deciduous_candidate.png` —
   raw/masked/reconstructed monthly NDVI, one panel per year, for each
-  selected pixel.
+  amplitude-selected pixel.
+- `14_ndvi_random_01.png` through `23_ndvi_random_10.png` — same figure
+  style, for 10 randomly-sampled dense-forest-interior pixels (no
+  amplitude selection).
+- `24_random_pixel_locations.png` — where the 10 random samples landed.

@@ -78,9 +78,15 @@ scikit-learn).
   holes) at ~0.04-0.08% of pixels each year, versus zero gaps for the
   robust/medoid versions (`08_annual_naive_undefined_zoom.png`). Per-pixel
   NDVI phenology checks (`10-13_ndvi_*.png`), relevant to this site's
-  deciduous-tree-mapping use case, found real recurring seasonal dips in
-  high-amplitude forest pixels that the reconstruction preserves rather
-  than smoothing away — see `docs/amazon.md`.
+  deciduous-tree-mapping use case, found the reconstruction preserves real
+  recurring seasonal signal rather than smoothing it away — but also found
+  that the highest-amplitude candidates sit right on the forest/non-forest
+  boundary, an unresolved confound between genuine deciduous phenology and
+  a boundary artifact. A follow-up unbiased check (10 random dense-forest-
+  interior pixels, no amplitude selection, `14-23_ndvi_random_*.png`) found
+  no comparable recurring signal in any of the 10 — consistent with
+  deciduous trees being genuinely rare here, not a method failure. See
+  `docs/amazon.md` for both.
 
 ## Honest limitations
 
