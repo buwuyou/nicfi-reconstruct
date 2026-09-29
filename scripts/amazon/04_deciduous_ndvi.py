@@ -34,10 +34,11 @@ matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
-from src import sites, io_utils, compose
+from src import sites, io_utils, compose, visualize
 
 site = sites.get_site("amazon")
 YEARS = list(range(2021, 2026))
+ZOOM_HALF = 40  # px each side -> 80x80 crop, ~380m x 380m at 4.78m/px
 
 # Fixed categorical colors, one per series, used identically in every panel.
 COLOR_RAW = "#999999"     # de-emphasized: this is the noisy "before"
@@ -75,18 +76,42 @@ def select_pixels(ndvi_raw, ndvi_recon, weight_final):
     return picks, mean_ndvi_conf, amp, forest
 
 
-def plot_pixel(name, rc, ndvi_raw, ndvi_masked, ndvi_recon, weight_final, out_path):
+def crop_with_marker(ax, refl_month, rc, half=ZOOM_HALF):
+    """Show an 80x80px RGB zoom around `rc` (observed reflectance for one
+    month), with the exact pixel marked -- ground-truths what the NDVI
+    curve below is actually looking at, and whether January of that year
+    happened to be clear or cloudy there.
+    """
     r, c = rc
-    fig, axes = plt.subplots(1, len(YEARS), figsize=(4 * len(YEARS), 3.6), sharey=True)
+    H, W = refl_month.shape[1:]
+    y0, y1 = max(0, r - half), min(H, r + half)
+    x0, x1 = max(0, c - half), min(W, c + half)
+    crop = refl_month[:, y0:y1, x0:x1]
+    ax.imshow(visualize.rgb_stretch(crop, gain=0.13, gamma=1.3))
+    ax.scatter([c - x0], [r - y0], s=90, marker="+", color="red", linewidth=2, zorder=5)
+    ax.scatter([c - x0], [r - y0], s=220, facecolor="none", edgecolor="red", linewidth=1.2, zorder=5)
+    ax.axis("off")
+
+
+def plot_pixel(name, rc, ndvi_raw, ndvi_masked, ndvi_recon, weight_final, refl, out_path):
+    r, c = rc
+    fig, axes = plt.subplots(2, len(YEARS), figsize=(4 * len(YEARS), 6.6),
+                              gridspec_kw={"height_ratios": [1, 1.3]})
     months_x = np.arange(1, 13)
 
     y_raw = ndvi_raw[:, r, c].reshape(len(YEARS), 12)
     y_masked = ndvi_masked[:, r, c].reshape(len(YEARS), 12)
     y_recon = ndvi_recon[:, r, c].reshape(len(YEARS), 12)
-    w = weight_final[:, r, c].reshape(len(YEARS), 12)
 
+    ndvi_axes = axes[1]
     for i, year in enumerate(YEARS):
-        ax = axes[i]
+        # top row: RGB zoom, January of this year, pixel marked
+        jan_idx = i * 12  # month 0 of that year = January
+        crop_with_marker(axes[0, i], refl[jan_idx], rc)
+        axes[0, i].set_title(f"{year}-01 RGB (zoom)", fontsize=10)
+
+        # bottom row: monthly NDVI for this year
+        ax = ndvi_axes[i]
         ax.plot(months_x, y_raw[i], "-", color=COLOR_RAW, lw=1.3, alpha=0.8,
                 label="raw (observed)" if i == 0 else None, zorder=2)
         ax.plot(months_x, y_recon[i], "-", color=COLOR_RECON, lw=2.2,
@@ -100,9 +125,11 @@ def plot_pixel(name, rc, ndvi_raw, ndvi_masked, ndvi_recon, weight_final, out_pa
         ax.grid(alpha=0.25, lw=0.5)
         if i == 0:
             ax.set_ylabel("NDVI")
+    for a in ndvi_axes[1:]:
+        a.sharey(ndvi_axes[0])
 
-    axes[0].legend(loc="lower left", fontsize=8, framealpha=0.9)
-    fig.suptitle(f"{name.replace('_', ' ')} — pixel (row={r}, col={c})", y=1.03, fontsize=13)
+    ndvi_axes[0].legend(loc="lower left", fontsize=8, framealpha=0.9)
+    fig.suptitle(f"{name.replace('_', ' ')} — pixel (row={r}, col={c})", y=1.02, fontsize=13)
     plt.tight_layout()
     plt.savefig(out_path, dpi=130, bbox_inches="tight")
     plt.close(fig)
@@ -128,7 +155,7 @@ def main():
 
     for i, (name, rc) in enumerate(picks.items(), start=10):
         out_path = site.fig_dir / f"{i}_ndvi_{name}.png"
-        plot_pixel(name, rc, ndvi_raw, ndvi_masked, ndvi_recon, weight_final, out_path)
+        plot_pixel(name, rc, ndvi_raw, ndvi_masked, ndvi_recon, weight_final, refl, out_path)
         print(f"  saved {out_path}")
 
     # ---- overview: where do these pixels sit relative to the whole tile? ----

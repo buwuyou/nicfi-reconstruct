@@ -109,9 +109,30 @@ classification** -- elevated NDVI amplitude with a recurring within-year
 dip is *consistent with* deciduous/semi-deciduous behavior, but confirming
 it would need ground reference data this project doesn't have.
 
+Each figure now also shows an 80x80px RGB zoom (January of each year, exact
+pixel marked with a red crosshair) above its NDVI panel, specifically to
+ground-truth what's being measured -- and it surfaced a real caveat, visible
+consistently across all four pixels: **the two low-amplitude pixels
+(`evergreen_like`, `typical`) both sit solidly inside a large, uniform
+forest interior in every year's zoom, while both higher-amplitude pixels
+(`elevated_amplitude`, `deciduous_candidate`) sit right at the boundary
+between dense forest and this tile's lower-NDVI tan/beige land-cover type**
+(a green patch against a lighter background in both figures' zoom rows).
+That's not proof of anything on its own (n=4, hand-inspected), but it's a
+real, unresolved ambiguity worth stating plainly: elevated NDVI amplitude
+at an edge pixel could reflect genuine deciduous phenology, *or* it could
+be a boundary/mixed-pixel effect (the 4.77m footprint spanning two
+different covers, with sub-pixel misregistration between months shifting
+how much of each cover falls inside the pixel) that has nothing to do with
+leaf phenology at all. The amplitude-based selection used here can't
+distinguish the two; doing so would need either finer-resolution imagery,
+an explicit edge/interior mask before ranking candidates, or checking
+whether the recurring dip's timing matches known deciduous phenology for
+this region -- none of which this project has done.
+
 **Result, per pixel** (`10_ndvi_evergreen_like.png` through
-`13_ndvi_deciduous_candidate.png`, raw/masked/reconstructed NDVI, one panel
-per year):
+`13_ndvi_deciduous_candidate.png`, RGB zoom + raw/masked/reconstructed
+NDVI, one panel per year):
 
 - **evergreen_like** and **typical**: flat NDVI (~0.78-0.85) across all 5
   years, with a handful of sharp downward spikes in the raw series (clear
@@ -128,15 +149,20 @@ per year):
   genuine one-off outliers (e.g. a clear cloud-contaminated spike in
   Oct 2025, pulled back toward the seasonal pattern rather than left in).
 
-The reassuring finding: at both high-amplitude pixels, the recurring shape
-is present *in the real observations themselves* (confidently-clear months
-directly show the dip/peak), and the reconstruction tracks it rather than
-erasing it — i.e. for these two pixels at least, the phenology model is
-not flattening genuine seasonal signal into the generic cluster curve.
-This doesn't fully retire the earlier concern (a pixel with much sparser
-real data than these two, selected specifically for good data support,
-could still be shrunk harder toward the cluster mean), but it's a positive
-data point rather than a purely theoretical worry.
+The reassuring finding, independent of the edge-effect caveat above: at
+both high-amplitude pixels, the recurring shape is present *in the real
+observations themselves* (confidently-clear months directly show the
+dip/peak), and the reconstruction tracks it rather than erasing it —
+whatever is physically driving the signal (deciduous phenology, a mixed
+forest/non-forest pixel, or something else), the pipeline is preserving
+it rather than flattening it into the generic cluster curve. That's the
+narrower, defensible claim; it doesn't retire the earlier concern about
+reconstruction erasing rare-class signal (a pixel with much sparser real
+data than these two, selected specifically for good data support, could
+still be shrunk harder toward the cluster mean), and it doesn't resolve
+whether either pixel is actually showing deciduous behavior -- but it is a
+positive data point on the narrower question of whether real signal
+survives reconstruction, rather than a purely theoretical worry.
 
 ## Figure index (`outputs/amazon/figures/`)
 
