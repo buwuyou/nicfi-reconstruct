@@ -1,5 +1,5 @@
 """
-Step 4: reconstruct every NICFI month -- contaminated/nodata NICFI pixels
+Step 5: reconstruct every NICFI month -- contaminated/nodata NICFI pixels
 replaced by that month's clear Sentinel-2 composite, harmonized onto NICFI's
 radiometry with a per-month fit (src/nicfis2/reconstruct.py).
 
@@ -8,13 +8,15 @@ few (heavy cloud in either sensor) borrows the median coefficients of its
 calendar year's fitted months (or of all months, failing that) -- recorded
 as "fallback" in cache/harmonization.json. A month whose clear-in-both red
 correlation is below MIN_FIT_R is marked "rejected": its S2 is not used at
-all (contaminated NICFI is kept, provenance 2) rather than trusted. Pass 2 writes, per month:
+all (contaminated NICFI is kept, quality source 3) rather than trusted. Pass 2 writes, per month:
   reconstructed/<tile>_<month>_recon.tif        4-band uint16, NICFI scale
-  reconstructed/<tile>_<month>_provenance.tif   0 NICFI clear, 1 S2-replaced,
-                                                2 contaminated kept (no clear
-                                                S2), 3 nodata
+  reconstructed/<tile>_<month>_quality.tif      5-band uint8 data-quality
+                                                layer: source, nicfi_class,
+                                                flags, s2_n_clear, score (codes
+                                                in src/nicfis2/reconstruct.py
+                                                and docs/amazon_nicfis2.md)
 
-Run: python scripts/amazon_nicfis2/04_reconstruct.py --tile D17
+Run: python scripts/amazon_nicfis2/05_reconstruct.py --tile D17
 """
 import argparse
 import json
@@ -23,6 +25,7 @@ import time
 from pathlib import Path
 
 import numpy as np
+import rasterio
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
 from src import io_utils
@@ -30,7 +33,16 @@ from src.nicfis2 import config as cfg, reconstruct as rc, s2_composite
 
 
 def load_quality(tile, month):
-    return np.load(tile.cache_dir / f"nicfi_quality_{month}.npz")["quality"]
+    """NICFI classes after the temporal check (03_temporal_mask_check.py)."""
+    z = np.load(tile.cache_dir / f"nicfi_quality_{month}.npz")
+    if "refined" not in z:
+        raise KeyError(f"{month}: no temporally re-checked NICFI mask -- run "
+                       f"03_temporal_mask_check.py first")
+    return z["refined"]
+
+
+def load_overridden(tile, month):
+    return np.load(tile.cache_dir / f"nicfi_quality_{month}.npz")["overridden"]
 
 
 def fit_all(tile) -> dict:
@@ -77,17 +89,23 @@ def main():
         comp = s2_composite.load(tile, month)
         f = fits.get(month)
         usable = f if f and f["source"] != "rejected" else None
-        res = rc.reconstruct_month(nicfi, q, n_tr, n_crs, comp, usable)
+        res = rc.reconstruct_month(nicfi, q, n_tr, n_crs, comp, usable,
+                                   overridden=load_overridden(tile, month))
         io_utils.save_geotiff(tile.recon_dir / f"{tile.tile_id}_{month}_recon.tif",
                               res.recon.clip(0, 65535).astype("uint16"), n_tr, n_crs,
                               dtype="uint16", nodata=0)
-        io_utils.save_geotiff(tile.recon_dir / f"{tile.tile_id}_{month}_provenance.tif",
-                              res.provenance[None], n_tr, n_crs, dtype="uint8")
-        p = res.provenance
+        qpath = tile.recon_dir / f"{tile.tile_id}_{month}_quality.tif"
+        io_utils.save_geotiff(qpath, res.quality, n_tr, n_crs, dtype="uint8")
+        with rasterio.open(qpath, "r+") as dst:
+            dst.descriptions = tuple(rc.QUALITY_BANDS)
+        src = res.source
         stats[month] = {
-            "native": float((p == rc.PROV_NATIVE).mean()), "s2": float((p == rc.PROV_S2).mean()),
-            "kept_dirty": float((p == rc.PROV_KEPT_DIRTY).mean()),
-            "nodata": float((p == rc.PROV_NODATA).mean()),
+            "native": float((src == rc.SRC_NICFI).mean()),
+            "s2": float(np.isin(src, (rc.SRC_S2_SINGLE, rc.SRC_S2_MEDIAN)).mean()),
+            "kept_dirty": float((src == rc.SRC_KEPT).mean()),
+            "nodata": float((src == rc.SRC_NODATA).mean()),
+            "overridden": float((res.quality[2] & rc.FLAG_OVERRIDDEN).astype(bool).mean()),
+            "mean_score": float(res.quality[4].mean()),
             "s2_method": comp.method if comp else "none",
             "fit": f["source"] if f else "none",
         }

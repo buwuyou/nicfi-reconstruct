@@ -53,10 +53,30 @@ LOCAL_MIN_N = 200    # clear-in-both px for a block to get its own fit
 LOCAL_N0 = 1000      # shrinkage strength toward the whole-tile fit
 MIN_FIT_R = 0.6  # red-band clear-in-both correlation; below this the month's S2 isn't trusted
 
-PROV_NATIVE = 0        # clear NICFI, kept
-PROV_S2 = 1            # contaminated/nodata NICFI, replaced by harmonized S2
-PROV_KEPT_DIRTY = 2    # contaminated NICFI, no clear S2 this month -> kept as-is
-PROV_NODATA = 3        # NICFI nodata and no clear S2
+# ---- Per-month data-quality layer (<tile>_<month>_quality.tif), 5 bands ----
+QUALITY_BANDS = ["source", "nicfi_class", "flags", "s2_n_clear", "score"]
+# band 1 "source": where the reconstructed value comes from
+SRC_NICFI = 0          # clear NICFI, kept
+SRC_S2_SINGLE = 1      # replaced by harmonized S2, the month's single cloud-free frame
+SRC_S2_MEDIAN = 2      # replaced by harmonized S2, median of clear observations
+SRC_KEPT = 3           # contaminated NICFI kept as-is (no clear S2 this month)
+SRC_NODATA = 4         # no data from either sensor
+SOURCE_NAMES = ["NICFI clear", "S2 single frame", "S2 median", "contaminated NICFI kept", "nodata"]
+# band 2 "nicfi_class": NICFI cloud class after the temporal check (cloud_mask codes)
+# band 3 "flags" (bit field)
+FLAG_OVERRIDDEN = 1    # NICFI cloud flag overridden as ground by the temporal check
+FLAG_BLEND = 2         # clear NICFI mixed with S2 in the edge ramp around a fill
+FLAG_FIT_FALLBACK = 4  # S2 harmonized with a borrowed (year-median) fit
+FLAG_BUFFER = 8        # NICFI class clear, replaced only as part of the cloud buffer
+# band 4 "s2_n_clear": clear S2 observations that month (0-255)
+# band 5 "score": 0-100 heuristic confidence in the reconstructed value
+SCORE_NICFI, SCORE_NICFI_OVERRIDDEN, SCORE_BLEND = 100, 90, 95
+SCORE_S2_SINGLE = 80
+SCORE_S2_MEDIAN = {1: 50, 2: 60}   # n_clear -> score; >= 3 -> 70
+SCORE_S2_MEDIAN_MANY = 70
+SCORE_FALLBACK_PENALTY = 15
+SCORE_KEPT = {cloud_mask.CLEAR: 60, cloud_mask.HAZE: 30, cloud_mask.CLOUD_THIN: 20,
+              cloud_mask.SHADOW: 10, cloud_mask.CLOUD_THICK: 0}
 
 CONTAMINATED = (cloud_mask.CLOUD_THICK, cloud_mask.CLOUD_THIN, cloud_mask.SHADOW,
                 cloud_mask.HAZE)
@@ -180,24 +200,66 @@ def feather_alpha(mask: np.ndarray, feather_px: int = FEATHER_PX) -> np.ndarray:
 @dataclass
 class Result:
     recon: np.ndarray        # (4,H,W) float32, NICFI scale
-    provenance: np.ndarray   # (H,W) uint8 PROV_*
+    quality: np.ndarray      # (5,H,W) uint8, QUALITY_BANDS
     s2_harmonized: np.ndarray  # (4,H,W) on NICFI grid (0 where no clear S2)
+
+    @property
+    def source(self):
+        return self.quality[0]
+
+
+def _quality_layer(quality, overridden, replace, fill, alpha, source, n_clear, fallback):
+    h, w = quality.shape
+    src = np.full((h, w), SRC_NICFI, np.uint8)
+    flags = np.zeros((h, w), np.uint8)
+    flags[overridden] |= FLAG_OVERRIDDEN
+    flags[(alpha > 0) & ~fill] |= FLAG_BLEND
+    flags[replace & (quality == cloud_mask.CLEAR)] |= FLAG_BUFFER
+
+    score = np.full((h, w), SCORE_NICFI, np.int16)
+    score[overridden] = SCORE_NICFI_OVERRIDDEN
+    score[(alpha > 0) & ~fill] = SCORE_BLEND
+
+    single = fill & (source == SRC_S2_SINGLE)
+    median = fill & ~single
+    src[single], src[median] = SRC_S2_SINGLE, SRC_S2_MEDIAN
+    score[single] = SCORE_S2_SINGLE
+    med_score = np.where(n_clear >= 3, SCORE_S2_MEDIAN_MANY,
+                         np.where(n_clear == 2, SCORE_S2_MEDIAN[2], SCORE_S2_MEDIAN[1]))
+    score[median] = med_score[median]
+    if fallback:
+        flags[fill] |= FLAG_FIT_FALLBACK
+        score[fill] -= SCORE_FALLBACK_PENALTY
+
+    kept = replace & ~fill
+    src[kept] = SRC_KEPT
+    for cls, sc in SCORE_KEPT.items():
+        score[kept & (quality == cls)] = sc
+    nodata = (quality == cloud_mask.NODATA) & ~fill
+    src[nodata] = SRC_NODATA
+    score[nodata] = 0
+    return np.stack([src, quality.astype(np.uint8), flags, n_clear.astype(np.uint8),
+                     np.clip(score, 0, 100).astype(np.uint8)])
 
 
 def reconstruct_month(nicfi_raw, quality, n_tr, n_crs, comp: Optional[Composite],
-                      coeffs: Optional[dict]) -> Result:
-    """coeffs: whole-tile fit (fit_month), plus "source": "month" -> refined
+                      coeffs: Optional[dict], overridden: Optional[np.ndarray] = None) -> Result:
+    """quality: NICFI classes after the temporal check; overridden: where that
+    check turned a flag into clear (recorded in the quality layer).
+    coeffs: whole-tile fit (fit_month), plus "source": "month" -> refined
     locally (local_fields) around that prior; anything else (e.g. a borrowed
     year-median "fallback") -> applied as-is, since a month with too few
     clear-in-both pixels can't support a local fit either."""
     shape = nicfi_raw.shape[1:]
     replace = replace_mask(quality)
     nodata = quality == cloud_mask.NODATA
-    prov = np.full(shape, PROV_NATIVE, dtype=np.uint8)
+    if overridden is None:
+        overridden = np.zeros(shape, bool)
     if comp is None or coeffs is None:
-        prov[replace] = PROV_KEPT_DIRTY
-        prov[nodata] = PROV_NODATA
-        return Result(nicfi_raw.astype(np.float32), prov, np.zeros_like(nicfi_raw, np.float32))
+        none = np.zeros(shape, bool)
+        q = _quality_layer(quality, overridden, replace, none, np.zeros(shape, np.float32),
+                           np.zeros(shape, np.uint8), np.zeros(shape, np.uint8), False)
+        return Result(nicfi_raw.astype(np.float32), q, np.zeros_like(nicfi_raw, np.float32))
 
     if coeffs.get("source") == "month":
         nic, usable, s2 = _pairs(nicfi_raw, quality, n_tr, n_crs, comp)
@@ -213,13 +275,15 @@ def reconstruct_month(nicfi_raw, quality, n_tr, n_crs, comp: Optional[Composite]
     cover = _reproject(comp.valid[None].astype(np.float32), comp.transform, comp.crs, shape,
                        n_tr, n_crs, Resampling.average)[0] >= COVER_FRAC
     harm[:, ~cover] = 0.0
+    src_s2, n_clear = _reproject(np.stack([comp.source, comp.n_clear]).astype(np.float32),
+                                 comp.transform, comp.crs, shape, n_tr, n_crs,
+                                 Resampling.nearest).astype(np.uint8)
 
     fill = replace & cover
     alpha = feather_alpha(fill) * cover
     alpha[nodata & cover] = 1.0  # nothing real to blend toward
     recon = alpha * harm + (1.0 - alpha) * nicfi_raw
-    prov[fill] = PROV_S2
-    prov[replace & ~cover] = PROV_KEPT_DIRTY
-    prov[nodata & ~cover] = PROV_NODATA
     recon[:, nodata & ~cover] = 0.0
-    return Result(recon.astype(np.float32), prov, harm)
+    q = _quality_layer(quality, overridden, replace, fill, alpha, src_s2, n_clear,
+                       coeffs.get("source") != "month")
+    return Result(recon.astype(np.float32), q, harm)

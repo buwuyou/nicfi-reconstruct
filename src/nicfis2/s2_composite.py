@@ -108,7 +108,7 @@ def blue_reference(tile: cfg.Tile, year: str, buffer_px: int = DEFAULT_BUFFER_PX
     for f in tile.s2_frames(year):
         with rasterio.open(f) as src:
             b2 = src.read(band_index(list(src.descriptions))["B2"] + 1).astype(np.float32)
-        clear = clear_mask(np.load(mask_cache_path(tile, f))["classes"], buffer_px)
+        clear = clear_mask(load_frame_classes(tile, f), buffer_px)
         blues.append(np.where(clear, b2, np.nan))
     with warnings.catch_warnings():
         warnings.filterwarnings("ignore", message="All-NaN slice encountered")
@@ -121,6 +121,15 @@ def haze_free(blue: np.ndarray, ref: np.ndarray) -> np.ndarray:
     tol = np.maximum(HAZE_ABS_DN, HAZE_REL * ref)
     with np.errstate(invalid="ignore"):
         return ~(blue > ref + tol)  # NaN ref (never clear that year) -> not rejected
+
+
+def load_frame_classes(tile: cfg.Tile, frame: Path) -> np.ndarray:
+    """Frame classes after the temporal post-check (03_temporal_mask_check.py)."""
+    z = np.load(mask_cache_path(tile, frame))
+    if "refined" not in z:
+        raise KeyError(f"{frame.name}: no temporally re-checked mask -- run "
+                       f"03_temporal_mask_check.py first")
+    return z["refined"]
 
 
 def mask_cache_path(tile: cfg.Tile, frame: Path) -> Path:
@@ -161,7 +170,7 @@ def monthly_composite(tile: cfg.Tile, month: str, clear_thresh: float = DEFAULT_
         elif data.shape[1:] != stack[0].shape[1:] or f_tr != transform or f_names != names:
             raise ValueError(f"{f.name}: grid/bands differ from {frames[0].name} -- "
                              f"frames must share one grid; refusing to misalign")
-        clear = clear_mask(np.load(mpath)["classes"], buffer_px)
+        clear = clear_mask(load_frame_classes(tile, f), buffer_px)
         clear &= haze_free(data[band_index(f_names)["B2"]], ref)
         clear = ndimage.binary_opening(clear, iterations=1)  # drop haze-test speckle
         stack.append(data)

@@ -1,9 +1,9 @@
 """
-Step 3: cloud/shadow/haze quality codes for every NICFI month (the same OCM
+Step 2: cloud/shadow/haze quality codes for every NICFI month (the same OCM
 ensemble + haze heuristic as the temporal pipeline, src/cloud_mask.py).
 Caches cache/nicfi_quality_<month>.npz. Resumable.
 
-Run: python scripts/amazon_nicfis2/03_cloudmask_nicfi.py --tile D17
+Run: python scripts/amazon_nicfis2/02_cloudmask_nicfi.py --tile D17
 """
 import argparse
 import sys

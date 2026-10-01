@@ -1,11 +1,11 @@
 """
-Step 2: one clear Sentinel-2 composite per month (src/nicfis2/s2_composite.py):
+Step 4: one clear Sentinel-2 composite per month (src/nicfis2/s2_composite.py):
 the month's single cloud-free frame if one exists (clear over >=
 --clear-thresh of the tile), else the per-pixel median of clear
 observations. Writes cache/s2_composite_<month>.npz and a per-month summary
 (cache/s2_composite_summary.json).
 
-Run: python scripts/amazon_nicfis2/02_s2_composite.py --tile D17
+Run: python scripts/amazon_nicfis2/04_s2_composite.py --tile D17
 """
 import argparse
 import json
