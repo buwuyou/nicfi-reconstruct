@@ -26,12 +26,20 @@ what's actually here would mostly manufacture the appearance of sharpness
 without real new ground information — the same hallucination risk flagged
 for the DL spatial refiner (see main README), just in a different guise.
 
-**Decision: not pursued.** The `sen2sr` conda env this project uses already
-has `opensr-model`/`sen2sr` installed — a legitimate pretrained
-single-image super-resolution model (diffusion-based, from the openSR
-project) that takes a different, defensible approach (a learned image
-prior rather than multi-frame geometry). It's trained on Sentinel-2 (10m
-native), so applying it to NICFI's already-finer 4.77m Planet imagery would
-be a real domain shift in both resolution and sensor radiometry that would
-need honest evaluation before trusting it — flagged as a possible future
-direction, not attempted.
+**Decision: not pursued as multi-frame NICFI self-super-resolution.** The
+`sen2sr` conda env this project uses already has `opensr-model`/`sen2sr`
+installed — a legitimate pretrained single-image super-resolution model
+(diffusion-based, from the openSR project) that takes a different,
+defensible approach (a learned image prior rather than multi-frame
+geometry). It's trained on Sentinel-2 (10m native), so applying it to
+NICFI's already-finer 4.77m Planet imagery would be a real domain shift in
+both resolution and sensor radiometry that would need honest evaluation
+before trusting it — flagged at the time as a possible future direction,
+not attempted.
+
+That future direction has since been built, in a different shape than
+"upsample NICFI directly": rather than super-resolving NICFI itself, this
+model is applied to Sentinel-2 (its native domain, no resolution/radiometry
+domain shift) to fill NICFI's genuine data *gaps* — a different problem
+than the multi-frame reconstruction investigated above, for a new test
+tile (D02). See `docs/amazon_d02_s2fusion.md`.

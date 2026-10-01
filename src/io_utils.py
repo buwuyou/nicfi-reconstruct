@@ -58,6 +58,15 @@ def read_aoi_stack(site: sites.Site) -> AOIStack:
     return AOIStack(data=data, months=list(site.months), transform=transform, crs=crs)
 
 
+def read_full(path):
+    """Read an entire GeoTIFF (no AOI windowing, no site config -- used by the
+    D02 NICFI+Sentinel-2 fusion pipeline, which reads one tile/mosaic at a
+    time rather than a whole site stack). Returns (data (C,H,W) float32,
+    transform, crs)."""
+    with rasterio.open(path) as src:
+        return src.read().astype(np.float32), src.transform, src.crs
+
+
 def iter_tiling_windows(width, height, tile=1024, overlap=64):
     """Yield overlapping (row_off, col_off, h, w) windows covering a full
     tile in bounded-memory chunks. Not needed for either current test site

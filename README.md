@@ -45,6 +45,18 @@ outputs/vietnam/, outputs/amazon/   figures (tracked) + reconstructed GeoTIFFs/c
 docs/           detailed write-ups: vietnam.md, amazon.md, super-resolution.md
 ```
 
+A third, independent method lives alongside the above: `scripts/amazon_d02/`
+fills NICFI's genuine data *gaps* (not contaminated-but-present pixels) on a
+new tile, D02, using super-resolved Sentinel-2 rather than temporal
+interpolation — see `docs/amazon_d02_s2fusion.md` (which also records
+that D02 turned out to have no genuine gaps, only a fixed tile-edge
+border, plus a performance check of the SR output from
+`06_sr_performance.py`) (and
+`docs/super-resolution.md`, which flagged this as a future direction before
+it was built). Site config: `src/s2_fusion_site.py` (kept separate from
+`sites.py`'s NICFI-only `Site`, since this one is genuinely dual-sensor and
+10-band).
+
 ## Quick start
 
 ```bash
@@ -58,6 +70,13 @@ python scripts/amazon/01_process.py
 python scripts/amazon/02_visualize.py
 python scripts/amazon/03_annual_composite.py
 python scripts/amazon/04_deciduous_ndvi.py
+
+python scripts/amazon_d02/01_prepare.py
+python scripts/amazon_d02/02_harmonize.py
+python scripts/amazon_d02/03_superresolve.py   # needs a working GPU
+python scripts/amazon_d02/04_fuse.py
+python scripts/amazon_d02/05_visualize.py
+python scripts/amazon_d02/06_sr_performance.py   # SR performance check
 ```
 
 Environment: `sen2sr` conda env (torch, rasterio, omnicloudmask,
@@ -101,8 +120,11 @@ scikit-learn).
   a change-detection method.
 - Both test sites are NICFI analytic 4-band products at the same
   resolution/processing level — a different sensor hasn't been tested.
-- Multi-frame super-resolution was investigated and deliberately not
-  built — see `docs/super-resolution.md` for why.
+- Multi-frame super-resolution of NICFI *itself* was investigated and
+  deliberately not built — see `docs/super-resolution.md` for why. A
+  related but different idea (super-resolving *Sentinel-2*, in its native
+  domain, to fill NICFI's genuine gaps) has since been built for tile D02
+  — see `docs/amazon_d02_s2fusion.md`.
 
 ## Gotchas
 

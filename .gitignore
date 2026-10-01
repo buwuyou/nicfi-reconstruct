@@ -10,3 +10,5 @@ outputs/*/annual/
 __pycache__/
 *.pyc
 .ipynb_checkpoints/
+# Run logs
+outputs/*/*.log
