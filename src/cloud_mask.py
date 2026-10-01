@@ -60,6 +60,28 @@ def _haze_index(refl: np.ndarray) -> np.ndarray:
     return haze
 
 
+def ocm_ensemble(rgn: np.ndarray, device: str = "cpu", model_versions=(3.0, 4.0)):
+    """rgn: (3,H,W) Red/Green/NIR reflectance, 0 = nodata. Runs each
+    OmniCloudMask generation in `model_versions` and averages their softmax
+    class probabilities (see module docstring). Returns (pred (H,W) int in
+    {0=clear,1=thick,2=thin,3=shadow}, disagreement (H,W) float32 = fraction
+    of models whose own argmax differs from the consensus). Sensor-agnostic:
+    used for NICFI here and for Sentinel-2 by `src/nicfis2/s2_composite.py`."""
+    from omnicloudmask import predict_from_array
+
+    probs = []
+    for v in model_versions:
+        probs.append(predict_from_array(
+            rgn.astype(np.float32), patch_size=1000, patch_overlap=300, batch_size=1,
+            inference_device=device, no_data_value=0, apply_no_data_mask=True,
+            export_confidence=True, softmax_output=True, model_version=v,
+        ))  # (4,H,W) class probabilities
+    probs = np.stack(probs, axis=0)  # (n_models,4,H,W)
+    pred = probs.mean(axis=0).argmax(axis=0)  # (H,W) in {0,1,2,3}
+    disagreement = (probs.argmax(axis=1) != pred[None]).mean(axis=0).astype(np.float32)
+    return pred, disagreement
+
+
 def compute_masks(stack_refl: np.ndarray, device: str = "cpu", haze_thresh: float = 0.14,
                    model_versions=(3.0, 4.0)) -> np.ndarray:
     """stack_refl: (T,4,H,W) reflectance in [0,~1.2]. Returns (T,H,W) uint8
@@ -69,8 +91,6 @@ def compute_masks(stack_refl: np.ndarray, device: str = "cpu", haze_thresh: floa
     softmax class probabilities before taking the class with highest
     consensus confidence (see module docstring).
     """
-    from omnicloudmask import predict_from_array
-
     T = stack_refl.shape[0]
     quality = np.zeros((T,) + stack_refl.shape[2:], dtype=np.uint8)
     disagreement = np.zeros((T,) + stack_refl.shape[2:], dtype=np.float32)
@@ -78,22 +98,8 @@ def compute_masks(stack_refl: np.ndarray, device: str = "cpu", haze_thresh: floa
     for t in range(T):
         refl = stack_refl[t]
         nodata_mask = np.all(refl <= 0, axis=0)
-        rgn = np.stack([refl[config.RED], refl[config.GREEN], refl[config.NIR]], axis=0).astype(np.float32)
-
-        probs = []
-        for v in model_versions:
-            p = predict_from_array(
-                rgn, patch_size=1000, patch_overlap=300, batch_size=1,
-                inference_device=device, no_data_value=0, apply_no_data_mask=True,
-                export_confidence=True, softmax_output=True, model_version=v,
-            )  # (4,H,W) class probabilities
-            probs.append(p)
-        probs = np.stack(probs, axis=0)  # (n_models,4,H,W)
-        mean_probs = probs.mean(axis=0)  # (4,H,W)
-        pred = mean_probs.argmax(axis=0)  # (H,W) in {0,1,2,3}
-        # per-model class disagreement: how far each model's argmax spread from the consensus
-        model_preds = probs.argmax(axis=1)  # (n_models,H,W)
-        disagreement[t] = (model_preds != pred[None]).mean(axis=0)  # fraction of models disagreeing
+        rgn = np.stack([refl[config.RED], refl[config.GREEN], refl[config.NIR]], axis=0)
+        pred, disagreement[t] = ocm_ensemble(rgn, device=device, model_versions=model_versions)
 
         q = np.zeros_like(pred, dtype=np.uint8)
         q[pred == 1] = CLOUD_THICK

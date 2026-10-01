@@ -45,17 +45,14 @@ outputs/vietnam/, outputs/amazon/   figures (tracked) + reconstructed GeoTIFFs/c
 docs/           detailed write-ups: vietnam.md, amazon.md, super-resolution.md
 ```
 
-A third, independent method lives alongside the above: `scripts/amazon_d02/`
-fills NICFI's genuine data *gaps* (not contaminated-but-present pixels) on a
-new tile, D02, using super-resolved Sentinel-2 rather than temporal
-interpolation — see `docs/amazon_d02_s2fusion.md` (which also records
-that D02 turned out to have no genuine gaps, only a fixed tile-edge
-border, plus a performance check of the SR output from
-`06_sr_performance.py`) (and
-`docs/super-resolution.md`, which flagged this as a future direction before
-it was built). Site config: `src/s2_fusion_site.py` (kept separate from
-`sites.py`'s NICFI-only `Site`, since this one is genuinely dual-sensor and
-10-band).
+A third, independent method lives alongside the above: `scripts/amazon_nicfis2/`
+replaces cloudy NICFI pixels with a clear Sentinel-2 observation from the
+*same month* (OmniCloudMask on raw Sentinel-2, single cloud-free frame when
+available else a median of clear observations, local quantile-matching onto
+NICFI's radiometry). Site-agnostic (`--tile <ID>`), first run on tile D17,
+all 60 months -- see `docs/amazon_nicfis2.md`. Code in `src/nicfis2/`, kept
+separate from `sites.py`'s NICFI-only `Site` since it's genuinely
+dual-sensor.
 
 ## Quick start
 
@@ -71,12 +68,11 @@ python scripts/amazon/02_visualize.py
 python scripts/amazon/03_annual_composite.py
 python scripts/amazon/04_deciduous_ndvi.py
 
-python scripts/amazon_d02/01_prepare.py
-python scripts/amazon_d02/02_harmonize.py
-python scripts/amazon_d02/03_superresolve.py   # needs a working GPU
-python scripts/amazon_d02/04_fuse.py
-python scripts/amazon_d02/05_visualize.py
-python scripts/amazon_d02/06_sr_performance.py   # SR performance check
+python scripts/amazon_nicfis2/01_cloudmask_s2.py    --tile D17   # GPU
+python scripts/amazon_nicfis2/02_s2_composite.py    --tile D17
+python scripts/amazon_nicfis2/03_cloudmask_nicfi.py --tile D17   # GPU
+python scripts/amazon_nicfis2/04_reconstruct.py     --tile D17
+python scripts/amazon_nicfis2/05_visualize.py       --tile D17
 ```
 
 Environment: `sen2sr` conda env (torch, rasterio, omnicloudmask,
@@ -122,9 +118,13 @@ scikit-learn).
   resolution/processing level — a different sensor hasn't been tested.
 - Multi-frame super-resolution of NICFI *itself* was investigated and
   deliberately not built — see `docs/super-resolution.md` for why. A
-  related but different idea (super-resolving *Sentinel-2*, in its native
-  domain, to fill NICFI's genuine gaps) has since been built for tile D02
-  — see `docs/amazon_d02_s2fusion.md`.
+  related idea (super-resolving *Sentinel-2* to fill NICFI) was tested
+  and also not adopted -- it was no better than bilinear upsampling
+  against NICFI; same doc.
+- The NICFI+Sentinel-2 method can only replace a cloudy NICFI pixel when
+  Sentinel-2 saw that pixel clear the same month -- in the wet season it
+  usually didn't (D17: ~25% of all NICFI contamination replaced; see
+  `docs/amazon_nicfis2.md`).
 
 ## Gotchas
 

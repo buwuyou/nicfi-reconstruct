@@ -37,9 +37,12 @@ both resolution and sensor radiometry that would need honest evaluation
 before trusting it — flagged at the time as a possible future direction,
 not attempted.
 
-That future direction has since been built, in a different shape than
-"upsample NICFI directly": rather than super-resolving NICFI itself, this
-model is applied to Sentinel-2 (its native domain, no resolution/radiometry
-domain shift) to fill NICFI's genuine data *gaps* — a different problem
-than the multi-frame reconstruction investigated above, for a new test
-tile (D02). See `docs/amazon_d02_s2fusion.md`.
+A related idea was later tested: applying this model to *Sentinel-2* (its
+native domain) and using the 2.5m output to fill NICFI. On a test tile it
+reproduced its own 10m input faithfully (r 0.97-0.99 for B2/B4/B8 after
+block-averaging back), but agreed with NICFI *no better than a plain
+bilinear upsample* of the 10m Sentinel-2 on any band/month -- and worse on
+fine detail (high-pass r, e.g. blue 0.27 vs 0.40): the sub-10m texture it
+adds is plausible, not what NICFI sees -- at ~17 GPU-min per tile-month. So
+the NICFI+Sentinel-2 pipeline (`docs/amazon_nicfis2.md`) upsamples
+bilinearly and doesn't use SR.

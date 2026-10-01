@@ -60,7 +60,7 @@ def read_aoi_stack(site: sites.Site) -> AOIStack:
 
 def read_full(path):
     """Read an entire GeoTIFF (no AOI windowing, no site config -- used by the
-    D02 NICFI+Sentinel-2 fusion pipeline, which reads one tile/mosaic at a
+    NICFI+Sentinel-2 pipeline (src/nicfis2/), which reads one tile/mosaic at a
     time rather than a whole site stack). Returns (data (C,H,W) float32,
     transform, crs)."""
     with rasterio.open(path) as src:
