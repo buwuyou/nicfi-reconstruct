@@ -41,7 +41,7 @@ import rasterio
 from scipy import ndimage
 
 from .. import cloud_mask
-from . import config as cfg
+from . import config as cfg, temporal_mask
 
 SOURCE_NONE = 0     # no clear observation this month
 SOURCE_SINGLE = 1   # the month's single cloud-free frame
@@ -157,6 +157,8 @@ def monthly_composite(tile: cfg.Tile, month: str, clear_thresh: float = DEFAULT_
     if not frames:
         return None
     ref = blue_reference(tile, month[:4], buffer_px)
+    with rasterio.open(frames[0]) as src:
+        min_px = temporal_mask.min_blob_px(src.transform, src.crs)
     stack, clears, frame_clear = [], [], {}
     transform = crs = names = None
     for f in frames:
@@ -171,8 +173,10 @@ def monthly_composite(tile: cfg.Tile, month: str, clear_thresh: float = DEFAULT_
             raise ValueError(f"{f.name}: grid/bands differ from {frames[0].name} -- "
                              f"frames must share one grid; refusing to misalign")
         clear = clear_mask(load_frame_classes(tile, f), buffer_px)
-        clear &= haze_free(data[band_index(f_names)["B2"]], ref)
-        clear = ndimage.binary_opening(clear, iterations=1)  # drop haze-test speckle
+        # haze-test rejections: like cloud flags, isolated ones are speckle
+        hazy = clear & ~haze_free(data[band_index(f_names)["B2"]], ref)
+        clear &= ~temporal_mask.despeckle(hazy, min_px)
+        clear = temporal_mask.despeckle(clear, min_px)  # and isolated clear specks
         stack.append(data)
         clears.append(clear)
         frame_clear[f.stem] = float(clear.mean())

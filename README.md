@@ -50,8 +50,11 @@ replaces cloudy NICFI pixels with a clear Sentinel-2 observation from the
 *same month* (OmniCloudMask on raw Sentinel-2, single cloud-free frame when
 available else a median of clear observations, local quantile-matching onto
 NICFI's radiometry), with a temporal post-check that un-flags spots both
-cloud masks call cloud in most clear observations, and a per-month
-data-quality layer (source, cloud class, flags, S2 obs count, score). Site-agnostic (`--tile <ID>`), first run on tile D17,
+cloud masks call cloud in most clear observations, a spatial speckle check,
+and a per-month data-quality layer (source, cloud class, flags, S2 obs
+count, score). Step 7 is a NICFI-only alternative: one typical year of 12
+monthly images composited from all NICFI years (~99% clear same-month
+coverage on D17). Site-agnostic (`--tile <ID>`), first run on tile D17,
 all 60 months -- see `docs/amazon_nicfis2.md`. Code in `src/nicfis2/`, kept
 separate from `sites.py`'s NICFI-only `Site` since it's genuinely
 dual-sensor.
@@ -76,6 +79,7 @@ python scripts/amazon_nicfis2/03_temporal_mask_check.py --tile D17
 python scripts/amazon_nicfis2/04_s2_composite.py        --tile D17
 python scripts/amazon_nicfis2/05_reconstruct.py         --tile D17
 python scripts/amazon_nicfis2/06_visualize.py           --tile D17
+python scripts/amazon_nicfis2/07_nicfi_multiyear_monthly.py --tile D17   # NICFI-only typical year
 ```
 
 Environment: `sen2sr` conda env (torch, rasterio, omnicloudmask,
@@ -126,7 +130,7 @@ scikit-learn).
   against NICFI; same doc.
 - The NICFI+Sentinel-2 method can only replace a cloudy NICFI pixel when
   Sentinel-2 saw that pixel clear the same month -- in the wet season it
-  usually didn't (D17: ~23% of all NICFI contamination replaced; see
+  usually didn't (D17: ~24.5% of all NICFI contamination replaced; see
   `docs/amazon_nicfis2.md`).
 
 ## Gotchas

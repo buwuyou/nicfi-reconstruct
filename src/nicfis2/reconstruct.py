@@ -51,6 +51,11 @@ MAX_FIT_SAMPLES = 200_000
 LOCAL_BLOCK = 64     # S2 px, ~640m
 LOCAL_MIN_N = 200    # clear-in-both px for a block to get its own fit
 LOCAL_N0 = 1000      # shrinkage strength toward the whole-tile fit
+# Hard bounds on any fitted slope. A block whose source band is nearly flat
+# (tiny p10-p90 spread) gives target_spread / ~0 -- shrinkage alone doesn't
+# bound that: the NICFI-only multi-year December composite on D17 got red =
+# 13,804 DN (raw observations 127-431) from exactly this.
+SLOPE_RANGE = (0.25, 4.0)
 MIN_FIT_R = 0.6  # red-band clear-in-both correlation; below this the month's S2 isn't trusted
 
 # ---- Per-month data-quality layer (<tile>_<month>_quality.tif), 5 bands ----
@@ -64,7 +69,7 @@ SRC_NODATA = 4         # no data from either sensor
 SOURCE_NAMES = ["NICFI clear", "S2 single frame", "S2 median", "contaminated NICFI kept", "nodata"]
 # band 2 "nicfi_class": NICFI cloud class after the temporal check (cloud_mask codes)
 # band 3 "flags" (bit field)
-FLAG_OVERRIDDEN = 1    # NICFI cloud flag overridden as ground by the temporal check
+FLAG_OVERRIDDEN = 1    # NICFI cloud flag cleared by the post-check (temporal: ground; spatial: speckle)
 FLAG_BLEND = 2         # clear NICFI mixed with S2 in the edge ramp around a fill
 FLAG_FIT_FALLBACK = 4  # S2 harmonized with a borrowed (year-median) fit
 FLAG_BUFFER = 8        # NICFI class clear, replaced only as part of the cloud buffer
@@ -141,7 +146,7 @@ def fit_month(nicfi_raw, quality, n_tr, n_crs, comp: Composite,
     for i, band in enumerate(cfg.NICFI_BAND_NAMES):
         x, y = s2[i].ravel()[idx], nic[i].ravel()[idx]
         (x50, xs), (y50, ys) = _qstats(x), _qstats(y)
-        slope = float(ys / xs)
+        slope = float(np.clip(ys / xs, *SLOPE_RANGE))
         coeffs[band] = (slope, float(y50 - slope * x50))
         coeffs[f"r_{band}"] = float(np.corrcoef(x, y)[0, 1])
     coeffs["n_samples"] = int(idx.size)
@@ -174,7 +179,8 @@ def local_fields(nic, usable, s2, coeffs, block=LOCAL_BLOCK, n0=LOCAL_N0):
                     continue
                 (x50, xs), (y50, ys) = _qstats(s2[i][sl][m]), _qstats(nic[i][sl][m])
                 wgt = n / (n + n0)
-                slope = wgt * (ys / xs) + (1 - wgt) * g_slope
+                slope = np.clip(wgt * np.clip(ys / xs, *SLOPE_RANGE) + (1 - wgt) * g_slope,
+                                *SLOPE_RANGE)
                 slope_b[i, by, bx] = slope
                 inter_b[i, by, bx] = y50 - slope * x50
     slope_b = ndimage.gaussian_filter(slope_b, (0, 1, 1), mode="nearest")

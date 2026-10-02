@@ -191,7 +191,7 @@ def fig_year(tile, year, months, stats, out):
             cands.append((score, m, r0, c0))
     cands = sorted(cands, reverse=True)[:PER_YEAR]
     if not cands:
-        return False
+        return []
     cands.sort(key=lambda t: t[1])
     fig, axes = plt.subplots(len(cands), 5, figsize=(22, 4.7 * len(cands)), squeeze=False)
     summ = json.loads((tile.cache_dir / "s2_composite_summary.json").read_text())
@@ -225,7 +225,7 @@ def fig_year(tile, year, months, stats, out):
     fig.tight_layout(rect=(0, 0.04, 1, 0.98))
     fig.savefig(out, dpi=95)
     plt.close(fig)
-    return True
+    return [{"month": m, "r0": int(r0), "c0": int(c0), "win": WIN} for _, m, r0, c0 in cands]
 
 
 def fig_full_tile(tile, stats, out, n=3):
@@ -309,9 +309,14 @@ def main():
     by_year = defaultdict(list)
     for m in sorted(stats):
         by_year[m[:4]].append(m)
+    windows = []
     for year, months in by_year.items():
-        if fig_year(tile, year, months, stats, tile.fig_dir / f"03_clouds_{year}.png"):
+        picked = fig_year(tile, year, months, stats, tile.fig_dir / f"03_clouds_{year}.png")
+        if picked:
+            windows += picked
             print(f"-> 03_clouds_{year}.png")
+    # reused by 07_nicfi_multiyear_monthly.py to plot the same example areas
+    (tile.cache_dir / "example_windows.json").write_text(json.dumps(windows, indent=1))
     fig_full_tile(tile, stats, tile.fig_dir / "04_full_tile.png")
     print("-> 04_full_tile.png")
     fig_temporal_check(tile, stats, tile.fig_dir / "05_temporal_check.png")

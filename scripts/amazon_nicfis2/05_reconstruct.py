@@ -42,7 +42,10 @@ def load_quality(tile, month):
 
 
 def load_overridden(tile, month):
-    return np.load(tile.cache_dir / f"nicfi_quality_{month}.npz")["overridden"]
+    """Flags cleared by either post-check (temporal, or speckle blob removal;
+    filled holes end up flagged, so they're not "overridden")."""
+    z = np.load(tile.cache_dir / f"nicfi_quality_{month}.npz")
+    return (z["overridden"] | z["despeckled"]) & (z["refined"] == 0)
 
 
 def fit_all(tile) -> dict:

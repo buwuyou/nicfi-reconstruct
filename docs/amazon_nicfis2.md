@@ -16,6 +16,7 @@ python scripts/amazon_nicfis2/03_temporal_mask_check.py --tile D17   # ~1 min
 python scripts/amazon_nicfis2/04_s2_composite.py        --tile D17
 python scripts/amazon_nicfis2/05_reconstruct.py         --tile D17
 python scripts/amazon_nicfis2/06_visualize.py           --tile D17
+python scripts/amazon_nicfis2/07_nicfi_multiyear_monthly.py --tile D17   # NICFI-only alternative
 ```
 Data layout (defaults, overridable): `<data-root>/<TILE>/*YYYY-MM.tif`
 (NICFI) and `<data-root>/<TILE>_S2/YYYY-MM-DD.tif` (Sentinel-2, band
@@ -41,7 +42,15 @@ descriptions B2..B12). `--months 2023 2024-05` restricts to month prefixes.
    darker NIR) over the same spot keeps its flag. D17: NICFI 6.1% of pixels
    persistent, 15% of all NICFI flags overridden -- mostly pink/bright
    canopy and bare patches OCM calls cloud at 4.77m; Sentinel-2 at 10m:
-   none. Raw OCM classes are kept in the cache next to the re-checked ones.
+   none. Then a **spatial** check: clouds are spatially coherent, so
+   flagged blobs smaller than 2500 m² (110 NICFI px / 26 S2 px) are
+   cleared as speckle, and clear holes that small inside a cloud are filled
+   with the nearest flagged class (D17: 633k NICFI and 63k S2 pixel-obs
+   changed). Without it, every isolated flag became a 7x7 hole after the
+   3 px buffer, and every isolated clear pixel inside a cloud stayed
+   unreplaced -- the speckle in the fills. The same clean-up is applied to
+   the S2 haze-test rejections and the final S2 clear mask. Raw OCM classes
+   are kept in the cache next to the re-checked ones.
 4. **Monthly S2 composite** -- if the clearest frame is clear over >= 99%
    of the tile, that *single* frame is used (one coherent acquisition); else
    the per-pixel median of clear observations. D17: 17 months single-frame,
@@ -67,7 +76,7 @@ descriptions set in the file):
 |---|---|---|
 | 1 | `source` | 0 NICFI clear · 1 S2 single cloud-free frame · 2 S2 median of clear obs · 3 contaminated NICFI kept (no clear S2) · 4 nodata |
 | 2 | `nicfi_class` | NICFI cloud class after the temporal check: 0 clear · 1 thick · 2 thin · 3 shadow · 4 haze · 5 nodata |
-| 3 | `flags` | bit 1: NICFI flag overridden by temporal check · 2: edge blend (clear NICFI mixed with S2) · 4: S2 fit borrowed (year median) · 8: replaced only as cloud buffer |
+| 3 | `flags` | bit 1: NICFI flag cleared by the post-check (temporal or speckle) · 2: edge blend (clear NICFI mixed with S2) · 4: S2 fit borrowed (year median) · 8: replaced only as cloud buffer |
 | 4 | `s2_n_clear` | clear S2 observations that month |
 | 5 | `score` | 0-100 heuristic confidence: NICFI clear 100 (overridden flag 90, edge blend 95); S2 single frame 80; S2 median 70 (>= 3 obs) / 60 (2) / 50 (1); -15 if the fit was borrowed; kept contaminated: buffer-only 60, haze 30, thin 20, shadow 10, thick 0; nodata 0 |
 
@@ -101,16 +110,61 @@ no ground truth behind it. Figures in `.../figures/`.
 - **Main limitation: the wet season.** When NICFI is cloudy, S2 usually is
   too: 2021-12 (70.8% contaminated, S2 composite 0% clear -> 0% replaced),
   2021-02, 2022-03, 2024-12, 2025-12 all keep most contamination. Of all
-  NICFI contamination over 60 months, about 23% gets replaced (after the temporal check; mean per-pixel quality score over all months 91/100).
+  NICFI contamination over 60 months, about 24.5% gets replaced (after the temporal + spatial checks; mean per-pixel quality score over all months 91/100).
 - **2024-09 is smoke, not cloud** (fire season): 98% of the tile flagged
   thin cloud in NICFI, S2 equally affected; nothing to replace it with.
 - **Residual S2 contamination in medians.** Some median-composite fills
-  still carry faint cloud (e.g. 2024-03, 2025-09 windows) and speckle where
-  only one or two observations survived masking.
+  still carry faint cloud (e.g. 2024-03, 2025-09 windows). Isolated speckle
+  is gone after the spatial check; what remains in hazy wet-season months
+  are larger, worm-shaped gaps -- S2's own fragmented clear area, a real
+  data limit rather than noise.
+- **Thin cloud is still over-called on NICFI in some months** (e.g. the
+  2023-02 window: a fairly clear-looking scene mostly flagged thin cloud).
+  Not persistent in time, so the temporal check can't catch it.
 - The temporal check shares the limitation noted in `docs/amazon.md`: haze
   that recurs at the same spot often enough becomes part of that spot's
   "typical appearance" and could be overridden too.
 - No independent ground truth: judged visually and via the fit statistics.
+
+## Single-sensor alternative: one typical year from all NICFI years (step 7)
+
+`07_nicfi_multiyear_monthly.py` (`src/nicfis2/multiyear.py`) builds 12
+monthly images from NICFI only, no Sentinel-2: for calendar month k, every
+year's month-k observation is a sample of that place in month k, and a
+pixel cloudy in one year is usually clear in another.
+
+- Clear = NICFI class after both post-checks, outside the cloud buffer.
+- Per pixel, clear observations are ranked by blue (haze raises blue); the
+  darkest is set aside as a possible unflagged shadow when there are >= 3,
+  and the next one is taken as a whole 4-band observation. Two earlier
+  versions failed visibly: the per-band median made February a hazy veil
+  (4 of 5 Februaries carry undetected thin haze, so the median *is* haze);
+  the lower quartile with floor() is the minimum for 3-4 clear years and
+  left dark shadow blotches in the wet-season months.
+- Every year is first normalized onto a first-pass composite with the same
+  local quantile matching (NICFI -> NICFI), so pixels drawn from different
+  years don't turn into patchiness. Fitted slopes are hard-clamped to
+  [0.25, 4] (also for the S2 fill): a block whose band is nearly flat in one
+  observation otherwise blew up -- the first December composite had a
+  saturated red patch (13,804 DN from raw values of 127-431).
+- Fallbacks, per pixel (`_quality.tif` band `tier`): clear same month ->
+  clear adjacent months -> least-contaminated same-month observation.
+
+Outputs: `nicfi_multiyear/<tile>_m<MM>.tif` + `_quality.tif` (tier,
+n_clear_same, n_clear_adjacent); figures `multiyear_01_tiers.png`,
+`multiyear_02_full_tile.png`, and `multiyear_03_<year>_r<row>_c<col>.png`
+for the same example areas as `03_clouds_<year>.png` (every year's original
+NICFI for each month, the composite, and the clear-year count behind it).
+
+**D17:** every calendar month is 98.8-98.9% filled from clear same-month
+observations (the remaining ~1.05% is the tile-edge nodata border; adjacent
+months are needed for <= 0.16%, least-contaminated never), with on average
+3.3 (Dec) to 4.9 (May-Aug) clear years per pixel. Compared to the
+S2-fusion route (~24.5% of contamination replaced), this is the much more
+complete product -- at the cost of being a *typical* year, not a specific
+one: it shows seasonality (e.g. the pink canopy flushes Jun-Oct), not
+year-specific change such as a new clearing or the 2024 fire-season
+smoke.
 
 ## Possible next steps
 

@@ -10,7 +10,16 @@ real cloud essentially never does. On D17's NICFI, 4.4% of pixels are
 flagged in >= 30% of the mostly-clear months (OCM at 4.77m is outside its
 10-50m training range); Sentinel-2 at 10m has ~none.
 
-Two-stage, so a real cloud passing over such a spot is still caught:
+A second, spatial check (`despeckle_classes`) follows in
+03_temporal_mask_check.py: clouds and their shadows are spatially coherent,
+so a flagged blob smaller than MIN_CLOUD_AREA_M2 (8-connected, all
+contaminated classes together) is classifier noise and is cleared, and a
+clear hole that small inside a cloud is filled. This matters beyond the mask
+itself: the cloud buffer dilates every flag by 3 px, turning each isolated
+flagged pixel into a 7x7 hole -- the speckle seen in the S2 composites.
+
+Temporal check, two-stage, so a real cloud passing over such a spot is
+still caught:
 1. **Persistent pixels**: flagged in >= `min_freq` of mostly-clear
    observations (scene contamination <= `mostly_clear_max`), and at least
    `min_count` times.
@@ -25,6 +34,7 @@ Two-stage, so a real cloud passing over such a spot is still caught:
 from dataclasses import dataclass
 
 import numpy as np
+from scipy import ndimage
 
 from .. import cloud_mask as cm
 
@@ -35,6 +45,55 @@ MIN_FREQ = 0.25
 MIN_COUNT = 3
 TOL_BLUE = (80.0, 0.35)   # DN floor, relative -- haze/cloud raise blue most
 TOL_NIR = (400.0, 0.25)   # shadows lower NIR most
+MIN_CLOUD_AREA_M2 = 2500.0  # 50 m x 50 m; smaller flagged blobs are speckle
+
+
+def pixel_area_m2(transform, crs) -> float:
+    """Approximate ground area of one pixel (geographic CRS: at the grid's
+    first-row latitude, adequate for a ~10 km tile)."""
+    dx, dy = abs(transform.a), abs(transform.e)
+    if crs.is_geographic:
+        lat = np.deg2rad(transform.f)
+        return dx * 111_320 * np.cos(lat) * dy * 110_574
+    return dx * dy
+
+
+def min_blob_px(transform, crs, area_m2: float = MIN_CLOUD_AREA_M2) -> int:
+    return max(1, int(round(area_m2 / pixel_area_m2(transform, crs))))
+
+
+def despeckle(mask: np.ndarray, min_px: int) -> np.ndarray:
+    """mask with 8-connected components smaller than `min_px` removed."""
+    if not mask.any():
+        return mask
+    lab, n = ndimage.label(mask, structure=np.ones((3, 3), bool))
+    sizes = np.bincount(lab.ravel())
+    keep = sizes >= min_px
+    keep[0] = False
+    return keep[lab]
+
+
+def despeckle_classes(classes: np.ndarray, min_px: int):
+    """Spatial clean-up of one (H,W) class map, symmetric in both directions:
+    - contaminated blobs smaller than `min_px` -> CLEAR (speckle, not cloud);
+    - clear holes smaller than `min_px` enclosed by contamination -> the
+      class of the nearest contaminated pixel (a 50 m gap inside a cloud is
+      not a trustworthy clear view; left in, it leaves isolated unreplaced
+      NICFI pixels inside a fill, or isolated "valid" S2 pixels at cloud
+      edges -- the speckle seen in the fills).
+    Returns (cleaned classes, bool mask of pixels changed)."""
+    flagged = np.isin(classes, CONTAMINATED)
+    removed = flagged & ~despeckle(flagged, min_px)
+    out = classes.copy()
+    out[removed] = cm.CLEAR
+
+    flagged = flagged & ~removed
+    clear = ~flagged & (classes != cm.NODATA)
+    holes = clear & ~despeckle(clear, min_px)
+    if holes.any() and flagged.any():
+        _, (ri, ci) = ndimage.distance_transform_edt(~flagged, return_indices=True)
+        out[holes] = classes[ri[holes], ci[holes]]
+    return out, removed | holes
 
 
 @dataclass
