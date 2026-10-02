@@ -9,6 +9,12 @@ and has been run end-to-end on two independent, deliberately different
 test sites: **Vietnam** (mountains, 1 year, cropped AOI) and **Amazon**
 (rainforest, 5 years, whole tile). Full write-ups for each are in `docs/`.
 
+![nicfirecon pipeline: preprocess -> reconstruct -> composite](docs/figures/pipeline_flowchart.png)
+
+The general pipeline above is `src/nicfirecon/` (`python -m src.nicfirecon`,
+see `docs/nicfirecon.md`); the sections below describe the original
+temporal method it builds on.
+
 ## Method, in one pass per pixel-month
 
 1. **Cloud/shadow/haze detection** (`src/cloud_mask.py`) — ensembled
@@ -41,23 +47,22 @@ against actual images rather than trusting aggregate numbers, are in
 ```
 src/            shared, site-agnostic pipeline code (sites.py = per-site config)
 scripts/vietnam/, scripts/amazon/   run scripts per test site
-outputs/vietnam/, outputs/amazon/   figures (tracked) + reconstructed GeoTIFFs/cache (gitignored, regenerable)
-docs/           detailed write-ups: vietnam.md, amazon.md, super-resolution.md
+outputs/<site or pipeline>/          figures (tracked) + products/cache (gitignored, regenerable)
+src/nicfirecon/ general tile pipeline (python -m src.nicfirecon); configs/ example run configs
+docs/           detailed write-ups: nicfirecon.md, vietnam.md, amazon.md, super-resolution.md
 ```
 
-A third, independent method lives alongside the above: `scripts/amazon_nicfis2/`
-replaces cloudy NICFI pixels with a clear Sentinel-2 observation from the
-*same month* (OmniCloudMask on raw Sentinel-2, single cloud-free frame when
-available else a median of clear observations, local quantile-matching onto
-NICFI's radiometry), with a temporal post-check that un-flags spots both
-cloud masks call cloud in most clear observations, a spatial speckle check,
-and a per-month data-quality layer (source, cloud class, flags, S2 obs
-count, score). Step 7 is a NICFI-only alternative: one typical year of 12
-monthly images composited from all NICFI years (~99% clear same-month
-coverage on D17). Site-agnostic (`--tile <ID>`), first run on tile D17,
-all 60 months -- see `docs/amazon_nicfis2.md`. Code in `src/nicfis2/`, kept
-separate from `sites.py`'s NICFI-only `Site` since it's genuinely
-dual-sensor.
+**The general pipeline, `src/nicfirecon/`** (`python -m src.nicfirecon`),
+is the recommended entry point for any new tile. It packages everything
+above and the later Sentinel-2 work into three stages with options --
+**preprocess** (OmniCloudMask on NICFI and raw Sentinel-2, a temporal +
+spatial post-check of both mask series, monthly clear S2 composites),
+**reconstruct** (`--method mask` | `s2fill [--add-s2-bands]` | `phenology`)
+and **composite** (`--type annual --source ...` | `typical-year`) -- every
+product with a per-pixel data-quality layer. Tile-agnostic (`--tile <ID>`),
+run end to end on tile D17. Usage, options and results: `docs/nicfirecon.md`.
+The per-site scripts below (`scripts/vietnam/`, `scripts/amazon/`) are kept
+as the reproducible record of the original AOI studies.
 
 ## Quick start
 
@@ -73,13 +78,9 @@ python scripts/amazon/02_visualize.py
 python scripts/amazon/03_annual_composite.py
 python scripts/amazon/04_deciduous_ndvi.py
 
-python scripts/amazon_nicfis2/01_cloudmask_s2.py        --tile D17   # GPU
-python scripts/amazon_nicfis2/02_cloudmask_nicfi.py     --tile D17   # GPU
-python scripts/amazon_nicfis2/03_temporal_mask_check.py --tile D17
-python scripts/amazon_nicfis2/04_s2_composite.py        --tile D17
-python scripts/amazon_nicfis2/05_reconstruct.py         --tile D17
-python scripts/amazon_nicfis2/06_visualize.py           --tile D17
-python scripts/amazon_nicfis2/07_nicfi_multiyear_monthly.py --tile D17   # NICFI-only typical year
+# general pipeline (any tile)
+python -m src.nicfirecon run --config configs/D17.yaml
+python -m src.nicfirecon --help
 ```
 
 Environment: `sen2sr` conda env (torch, rasterio, omnicloudmask,
@@ -131,7 +132,7 @@ scikit-learn).
 - The NICFI+Sentinel-2 method can only replace a cloudy NICFI pixel when
   Sentinel-2 saw that pixel clear the same month -- in the wet season it
   usually didn't (D17: ~24.5% of all NICFI contamination replaced; see
-  `docs/amazon_nicfis2.md`).
+  `docs/nicfirecon.md`).
 
 ## Gotchas
 

@@ -44,5 +44,5 @@ block-averaging back), but agreed with NICFI *no better than a plain
 bilinear upsample* of the 10m Sentinel-2 on any band/month -- and worse on
 fine detail (high-pass r, e.g. blue 0.27 vs 0.40): the sub-10m texture it
 adds is plausible, not what NICFI sees -- at ~17 GPU-min per tile-month. So
-the NICFI+Sentinel-2 pipeline (`docs/amazon_nicfis2.md`) upsamples
+the NICFI+Sentinel-2 pipeline (`docs/nicfirecon.md`) upsamples
 bilinearly and doesn't use SR.

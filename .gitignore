@@ -3,7 +3,7 @@
 # are the only outputs/ content tracked in git.
 outputs/**/cache/
 outputs/**/reconstructed/
-outputs/**/nicfi_multiyear/
+outputs/**/composites/
 outputs/*/reconstructed_v2/
 outputs/*/annual/
 

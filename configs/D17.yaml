@@ -1,0 +1,16 @@
+# Full chain for tile D17: python -m src.nicfirecon run --config configs/D17.yaml
+tile: D17
+data_root: /mnt/warehouse/amazon     # NICFI in <data_root>/D17, Sentinel-2 in <data_root>/D17_S2
+
+preprocess:                          # cloud masks -> post-check -> S2 monthly composites
+  device: cuda
+
+reconstruct:                         # one product per method, reconstructed/<method>/
+  - {method: mask}
+  - {method: s2fill, add_s2_bands: true}
+  - {method: phenology, device: cuda}
+
+composite:
+  - {type: typical-year}
+  - {type: annual, source: s2fill}
+  - {type: annual, source: phenology}

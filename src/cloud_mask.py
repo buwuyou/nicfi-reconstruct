@@ -66,7 +66,7 @@ def ocm_ensemble(rgn: np.ndarray, device: str = "cpu", model_versions=(3.0, 4.0)
     class probabilities (see module docstring). Returns (pred (H,W) int in
     {0=clear,1=thick,2=thin,3=shadow}, disagreement (H,W) float32 = fraction
     of models whose own argmax differs from the consensus). Sensor-agnostic:
-    used for NICFI here and for Sentinel-2 by `src/nicfis2/s2_composite.py`."""
+    used for NICFI here and for Sentinel-2 by `src/nicfirecon/masking.py`."""
     from omnicloudmask import predict_from_array
 
     probs = []
