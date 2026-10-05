@@ -5,7 +5,8 @@ specific to one tile: every command takes `--tile <ID>` (plus optional
 directory overrides), and the month list is discovered from the NICFI
 files actually on disk.
 
-Expected input layout (defaults; override with --nicfi-dir / --s2-dir):
+Expected input layout (defaults; override with --nicfi-dir / --s2-dir) --
+exactly what the `download` stage writes:
     <data-root>/<TILE>/        one NICFI monthly mosaic per month, any
                                filename ending in YYYY-MM.tif
     <data-root>/<TILE>_S2/     optional: raw single-date Sentinel-2 frames

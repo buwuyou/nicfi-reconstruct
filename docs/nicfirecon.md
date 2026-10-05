@@ -8,6 +8,8 @@ unmasked single-date Sentinel-2 frames.
 ![pipeline](figures/pipeline_flowchart.png)
 
 ```bash
+python -m src.nicfirecon download    --tile D99 --start 2021-01 --end 2025-12 \
+        --bbox -61.36 -10.28 -61.27 -10.19 --ee-project <gee-project>   # new tile from GEE
 python -m src.nicfirecon preprocess  --tile D17          # masks, post-check, S2 composites
 python -m src.nicfirecon reconstruct --tile D17 --method s2fill --add-s2-bands
 python -m src.nicfirecon reconstruct --tile D17 --method phenology
@@ -19,6 +21,7 @@ python -m src.nicfirecon <stage> --help                  # every option
 
 | stage | options | what it does |
 |---|---|---|
+| `download` | `--start/--end YYYY-MM`, `--bbox` or `--aoi FILE [--aoi-id-field]`, `--sensors nicfi,s2`, `--ee-project`, `--nicfi-region`, `--s2-max-cloud` | NICFI monthly basemaps (region from the AOI's longitude) on their native 4.77 m EPSG:3857 grid, plus raw unmasked Sentinel-2 L2A frames (same-day granules mosaicked, 10 bands, ~10 m EPSG:4326), from Google Earth Engine, into exactly the input layout below; chunked, parallel, resumable. Adapted from `/mnt/super/code/nicfi_download.py`. Needs `earthengine authenticate` once. *Not yet run against GEE; its output grids were checked offline to match D17's existing files.* |
 | `preprocess` | `--steps mask,postcheck,s2composite`, `--sensors nicfi,s2`, `--no-temporal`, `--min-cloud-area`, `--s2-clear-thresh`, `--s2-buffer-px` | OmniCloudMask ensemble per observation (both sensors, GPU, resumable) → temporal + spatial post-check → monthly clear S2 composite. S2 steps are skipped if the tile has no S2 frames. |
 | `reconstruct` | `--method mask` | contaminated + nodata NICFI pixels set to nodata; the conservative product |
 | | `--method s2fill [--add-s2-bands]` | contaminated pixels replaced by same-month harmonized S2; `--add-s2-bands` appends S2 B5/B6/B7/B8A/B11/B12 (10 bands) |

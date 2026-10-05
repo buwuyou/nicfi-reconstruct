@@ -54,7 +54,8 @@ docs/           detailed write-ups: nicfirecon.md, vietnam.md, amazon.md, super-
 
 **The general pipeline, `src/nicfirecon/`** (`python -m src.nicfirecon`),
 is the recommended entry point for any new tile. It packages everything
-above and the later Sentinel-2 work into three stages with options --
+above and the later Sentinel-2 work into stages with options --
+**download** (NICFI + raw Sentinel-2 from Earth Engine for any AOI),
 **preprocess** (OmniCloudMask on NICFI and raw Sentinel-2, a temporal +
 spatial post-check of both mask series, monthly clear S2 composites),
 **reconstruct** (`--method mask` | `s2fill [--add-s2-bands]` | `phenology`)

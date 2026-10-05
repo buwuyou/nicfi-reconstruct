@@ -8,6 +8,9 @@ Command line for the NICFI reconstruction pipeline. Run from the repo root:
 
 Stages (each writes its QA figures unless --no-figures):
 
+download     NICFI monthly basemaps (+ optional raw Sentinel-2 frames) from
+             Google Earth Engine for an AOI (--bbox or --aoi file), into the
+             layout every later stage reads (needs `earthengine authenticate`)
 preprocess   --steps mask,postcheck,s2composite (default: all)
              mask         OmniCloudMask ensemble per observation (GPU)
              postcheck    temporal (persistent "cloud" that looks the same
@@ -26,11 +29,18 @@ import sys
 import time
 from pathlib import Path
 
-from . import composite, config as cfg, masking, postcheck, reconstruct, s2, viz
+from . import composite, config as cfg, download, masking, postcheck, reconstruct, s2, viz
 
 
 def _log(msg):
     print(f"[{time.strftime('%H:%M:%S')}] {msg}", flush=True)
+
+
+def do_download(tile, start, end, sensors=("nicfi", "s2"), bbox=None, aoi=None, aoi_id_field=None,
+                ee_project=None, nicfi_region=None, s2_max_cloud=100.0):
+    _log(f"download {start}..{end}: {', '.join(sensors)}")
+    download.run_download(tile, start, end, sensors, bbox, Path(aoi) if aoi else None, aoi_id_field,
+                          ee_project, nicfi_region, s2_max_cloud, _log)
 
 
 def do_preprocess(tile, steps=("mask", "postcheck", "s2composite"), sensors=None, device="cuda",
@@ -86,6 +96,9 @@ def do_run(config_path: Path):
 
         tile: D17
         data_root: /mnt/warehouse/amazon        # optional, like the CLI flags
+        download:                               # optional; skip if data is on disk
+          {start: 2021-01, end: 2025-12, bbox: [-61.36, -10.28, -61.27, -10.19],
+           ee_project: my-project}
         preprocess: {device: cuda}              # or false to skip
         reconstruct:
           - {method: s2fill, add_s2_bands: true}
@@ -103,6 +116,10 @@ def do_run(config_path: Path):
         out_base=Path(c.get("out_base", cfg.PROJECT_DIR / "outputs" / cfg.PIPELINE_NAME)))
     tile = cfg.tile_from_args(tile_args)
     t0 = time.time()
+    if c.get("download"):
+        d = dict(c["download"])
+        d["start"], d["end"] = str(d["start"]), str(d["end"])
+        do_download(tile, **d)
     if c.get("preprocess", {}) is not False:
         do_preprocess(tile, **(c.get("preprocess") or {}))
     for r in c.get("reconstruct", []) or []:
@@ -116,6 +133,19 @@ def main(argv=None):
     ap = argparse.ArgumentParser(prog="python -m src.nicfirecon", description=__doc__,
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
+
+    p = cfg.add_tile_args(sub.add_parser("download", help="NICFI (+ Sentinel-2) from Earth Engine"))
+    p.add_argument("--start", required=True, help="first month, YYYY-MM")
+    p.add_argument("--end", required=True, help="last month, YYYY-MM")
+    p.add_argument("--sensors", default="nicfi,s2", help="nicfi,s2 or nicfi")
+    p.add_argument("--bbox", nargs=4, type=float, metavar=("MIN_LON", "MIN_LAT", "MAX_LON", "MAX_LAT"))
+    p.add_argument("--aoi", type=Path, help="polygon file (GeoJSON/shapefile) instead of --bbox")
+    p.add_argument("--aoi-id-field", help="--aoi attribute whose value is the tile ID")
+    p.add_argument("--ee-project", help="Google Cloud project registered for Earth Engine")
+    p.add_argument("--nicfi-region", choices=("americas", "africa", "asia"),
+                   help="NICFI basemap (default: from the AOI's longitude)")
+    p.add_argument("--s2-max-cloud", type=float, default=100.0,
+                   help="skip S2 scenes above this CLOUDY_PIXEL_PERCENTAGE (default: keep all)")
 
     p = cfg.add_tile_args(sub.add_parser("preprocess", help="cloud masks, post-check, S2 composites"))
     p.add_argument("--steps", default="mask,postcheck,s2composite")
@@ -158,9 +188,12 @@ def main(argv=None):
     if a.cmd == "run":
         return do_run(a.config)
     tile = cfg.tile_from_args(a)
+    t0 = time.time()
+    if a.cmd == "download":
+        return do_download(tile, a.start, a.end, a.sensors.split(","), a.bbox, a.aoi, a.aoi_id_field,
+                           a.ee_project, a.nicfi_region, a.s2_max_cloud)
     _log(f"{tile.tile_id}: {len(tile.months)} NICFI months, "
          f"{len(tile.s2_frames())} S2 frames -> {tile.out_root}")
-    t0 = time.time()
     if a.cmd == "preprocess":
         do_preprocess(tile, a.steps.split(","), a.sensors.split(",") if a.sensors else None,
                       a.device, not a.no_temporal, a.min_cloud_area, a.s2_clear_thresh,

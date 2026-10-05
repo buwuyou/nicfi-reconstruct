@@ -51,13 +51,13 @@ B = lambda b: (b[0], b[1] - b[3] / 2)
 
 # columns
 xi, xp, xr, xc = 1.55, 5.05, 8.95, 12.85
-header(xi, None, "Inputs", "", "in")
+header(xi, "0", "Download", "download", "in")
 header(xp, "1", "Preprocess", "preprocess", "pre")
 header(xr, "2", "Reconstruct", "reconstruct --method", "rec")
 header(xc, "3", "Composite", "composite --type", "comp")
 
-nicfi = box(xi, 4.9, "NICFI monthly", "4 bands · 4.77 m", "in")
-sen2 = box(xi, 2.9, "Sentinel-2 frames", "optional · 10 m", "in")
+nicfi = box(xi, 4.9, "NICFI monthly", "GEE · 4 bands · 4.77 m", "in")
+sen2 = box(xi, 2.9, "Sentinel-2 L2A", "GEE · optional · 10 m", "in")
 
 mask = box(xp, 5.6, "Cloud mask", "OmniCloudMask", "pre")
 post = box(xp, 4.0, "Post-check", "temporal + speckle", "pre")
