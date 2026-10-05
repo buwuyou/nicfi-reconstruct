@@ -1,26 +1,30 @@
 """
-QA figures for every stage, written to outputs/nicfirecon/<tile>/figures/<stage>/.
+QA figures, in three sections under outputs/nicfirecon/<tile>/figures/. Each
+section compares every method/source that exists on disk, on the same
+example windows -- per year, the months whose ~1.2 km window holds the most
+cloud/shadow with some clear context left, picked once from the
+post-checked NICFI masks (cache/example_windows.json).
 
-Example areas ("windows") are chosen once per tile from the post-checked
-NICFI masks alone -- per year, the months whose ~1.2 km window holds the
-most cloud/shadow while still showing some clear context -- and cached in
-cache/example_windows.json, so every method and composite is shown on the
-same ground and can be compared side by side.
-
-preprocess/   postcheck.png        flag frequency in mostly-clear obs (NICFI,
-                                   S2), raw vs post-checked example, flags
-                                   cleared per month
-              s2_coverage.png      S2 composite clear coverage + method/month
-reconstruct/<method>/
-              overview.png         per month, % of tile by data source
-              harmonization.png    (s2fill) per-month S2->NICFI fit + trust
-              clouds_<year>.png    example windows: original | cloud mask |
-                                   [S2 used] | reconstructed | [S2 SWIR false
-                                   colour] | quality source
-              full_tile.png        the most contaminated months, whole tile
-composite/    typical_year_*.png   tiers, whole tile, example areas (every
-                                   year's NICFI per month vs the composite)
-              annual_<source>_*.png  whole tile per year, example areas
+1_cloudmask/
+    mask_stats.png           per month: % of tile per cloud class after the
+                             post-check, vs. the raw OCM total
+    postcheck_frequency.png  how often each pixel is flagged in mostly-clear
+                             obs (NICFI, S2) + NICFI flags cleared per month
+    mask_effect_<year>.png   example windows: NICFI | raw OCM mask |
+                             post-checked mask (cleared flags in blue)
+    s2_coverage.png          S2 composite clear coverage + method per month
+2_reconstruct/
+    sources_by_month.png     per method: % of tile by data source per month
+    harmonization.png        (s2fill) per-month S2->NICFI fit + trust
+    compare_<year>.png       example windows: original NICFI (+ mask) and
+                             each method's result, its quality source below
+    compare_full_tile.png    the most contaminated months, whole tile
+3_composite/
+    typical_year.png         12 monthly composites, one row per source
+    annual.png               annual composites, one row per source
+    coverage.png             per source, % of tile from usable observations
+    area_<year>_r<row>_c<col>.png  one example area: typical year + annual,
+                             one row per source
 """
 import json
 from collections import defaultdict
@@ -162,55 +166,8 @@ def _crop(a, w):
     return a[..., w["r0"]:w["r0"] + w["win"], w["c0"]:w["c0"] + w["win"]]
 
 
-# --------------------------------------------------------------- preprocess
-def fig_postcheck(tile, out_dir):
-    months = tile.all_months
-    zn = np.load(tile.cache_dir / "postcheck_nicfi.npz")
-    zs_path = tile.cache_dir / "postcheck_s2.npz"
-    cleared_frac = {m: float(masking.load_nicfi_cleared(tile, m).mean()) for m in months}
-    m = max(cleared_frac, key=cleared_frac.get)
-    nicfi, _, _ = io_utils.read_full(tile.nicfi_path(m))
-    raw = np.load(masking.nicfi_mask_path(tile, m))["quality"]
-    refined = masking.load_nicfi_classes(tile, m)
-    cleared = masking.load_nicfi_cleared(tile, m)
-    score = ndimage.uniform_filter(cleared.astype(np.float32), WIN)
-    r, c = np.unravel_index(np.argmax(score[WIN // 2:-WIN // 2, WIN // 2:-WIN // 2]),
-                            (score.shape[0] - WIN, score.shape[1] - WIN))
-    w = {"r0": r, "c0": c, "win": WIN}
-    crop = _crop(nicfi, w)
-    lims = lims_from(crop)
 
-    fig, axes = plt.subplots(2, 3, figsize=(18, 12))
-    for ax, zp, name in ((axes[0, 0], tile.cache_dir / "postcheck_nicfi.npz", "NICFI"),
-                         (axes[1, 0], zs_path, "Sentinel-2")):
-        if not zp.exists():
-            ax.set_visible(False)
-            continue
-        z = np.load(zp)
-        im = ax.imshow(z["flag_freq"][::2, ::2], cmap="Blues", vmin=0, vmax=1, interpolation="nearest")
-        ax.contour(z["persistent"][::2, ::2], levels=[0.5], colors=C8, linewidths=0.6)
-        ax.set_title(f"{name}: flag frequency in {int(z['mostly_clear'].sum())} mostly-clear obs\n"
-                     f"red = persistent ({z['persistent'].mean():.2%} of px)", fontsize=11)
-        fig.colorbar(im, ax=ax, shrink=0.7)
-    axes[0, 1].imshow(overlay(rgb(crop, lims), _crop(raw, w)))
-    axes[0, 1].set_title(f"{m}: raw OCM mask")
-    axes[0, 2].imshow(overlay(rgb(crop, lims), _crop(refined, w), _crop(cleared, w)))
-    axes[0, 2].set_title(f"after post-check ({cleared_frac[m]:.1%} of tile cleared)")
-    axes[1, 1].imshow(rgb(crop, lims)); axes[1, 1].set_title(f"{m}: NICFI")
-    x = np.arange(len(months))
-    axes[1, 2].bar(x, [cleared_frac[k] * 100 for k in months], color=C1, width=0.8)
-    axes[1, 2].set_ylabel("% of tile", color=INK)
-    axes[1, 2].set_title("NICFI flags cleared per month")
-    month_axis(axes[1, 2], months, 6)
-    tidy(axes[1, 2])
-    _noticks(axes.ravel()[[0, 1, 2, 3, 4]])
-    fig.legend(handles=mask_legend(), loc="lower center", ncol=5, frameon=False, fontsize=10)
-    fig.suptitle(f"{tile.tile_id}: cloud-mask post-check -- temporal (a spot flagged in most clear "
-                 f"obs, looking the same each time, is ground) + spatial (speckle)", fontsize=13)
-    fig.tight_layout(rect=(0, 0.03, 1, 0.97))
-    return _save(fig, out_dir / "postcheck.png", 90)
-
-
+# --------------------------------------------------------------- shared figs
 def fig_s2_coverage(tile, out_dir):
     path = tile.cache_dir / "s2_composite_summary.json"
     if not path.exists():
@@ -235,7 +192,6 @@ def fig_s2_coverage(tile, out_dir):
     return _save(fig, out_dir / "s2_coverage.png", 120)
 
 
-# -------------------------------------------------------------- reconstruct
 def _recon_stats(tile, method):
     p = tile.recon_dir(method) / "stats.json"
     if not p.exists():
@@ -248,34 +204,6 @@ def _load_recon(tile, method, month):
     data, _, _ = io_utils.read_full(d / f"{tile.tile_id}_{month}.tif")
     q, _, _ = io_utils.read_full(d / f"{tile.tile_id}_{month}_quality.tif")
     return data, q.astype(np.uint8)
-
-
-def fig_recon_overview(tile, method, st, out_dir):
-    months = [m for m in tile.months if m in st["months"]]
-    x = np.arange(len(months))
-    fig, ax = plt.subplots(figsize=(16, 4.8))
-    bottom = np.zeros(len(months))
-    shown = []
-    for code in (rc.SRC_S2_SINGLE, rc.SRC_S2_MEDIAN, rc.SRC_PHENO, rc.SRC_PHENO_BLEND,
-                 rc.SRC_CONTAMINATED):
-        name = rc.SOURCE_NAMES[code]
-        v = np.array([st["months"][m]["source"][name] for m in months]) * 100
-        if not v.any():
-            continue
-        label = name + (" (masked)" if method == "mask" and code == rc.SRC_CONTAMINATED else
-                        " (kept)" if code == rc.SRC_CONTAMINATED else "")
-        ax.bar(x, v, bottom=bottom, color=SOURCE_COLORS[code], width=0.8, edgecolor="white",
-               linewidth=0.5, label=label)
-        bottom += v
-        shown.append(code)
-    ax.set_ylabel("% of tile", color=INK)
-    ax.set_title(f"{tile.tile_id} [{method}]: pixels not taken from clear NICFI, by data source "
-                 "(rest = NICFI clear / nodata border)", fontsize=12)
-    ax.legend(frameon=False, fontsize=9, loc="upper left")
-    month_axis(ax, months)
-    tidy(ax)
-    fig.tight_layout()
-    return _save(fig, out_dir / "overview.png", 120)
 
 
 def fig_harmonization(tile, out_dir):
@@ -313,235 +241,337 @@ def fig_harmonization(tile, out_dir):
     return _save(fig, out_dir / "harmonization.png", 120)
 
 
-def fig_recon_windows(tile, method, st, out_dir):
-    windows = example_windows(tile)
-    bands = st["meta"]["bands"]
-    has_extra = len(bands) > 4
+
+SOURCE_LABEL = {"nicfi": "NICFI (raw, masked)", "mask": "mask", "s2fill": "s2fill",
+                "phenology": "phenology"}
+
+
+def _methods(tile):
+    return [m for m in rc.METHODS if (tile.recon_dir(m) / "stats.json").exists()]
+
+
+def _sources(tile, kind):
+    return [s for s in cp.SOURCES if (tile.composite_dir(kind, s) / "stats.json").exists()]
+
+
+# ------------------------------------------------------------- 1 cloud mask
+def _mask_month_stats(tile):
+    rows = {}
+    for m in tile.all_months:
+        z = np.load(masking.nicfi_mask_path(tile, m))
+        raw, ref = z["quality"], z["refined"]
+        rows[m] = {"raw": float(np.isin(raw, masking.CONTAMINATED).mean()),
+                   **{code: float((ref == code).mean()) for code in MASK_COLORS},
+                   "cleared": float(masking.load_nicfi_cleared(tile, m).mean())}
+    return rows
+
+
+def fig_mask_stats(tile, st, out_dir):
+    months = list(st)
+    x = np.arange(len(months))
+    fig, ax = plt.subplots(figsize=(16, 4.8))
+    bottom = np.zeros(len(months))
+    for code, (col, label) in MASK_COLORS.items():
+        v = np.array([st[m][code] for m in months]) * 100
+        ax.bar(x, v, bottom=bottom, color=col, width=0.8, label=label + " (post-checked)",
+               edgecolor="white", linewidth=0.5)
+        bottom += v
+    ax.plot(x, [st[m]["raw"] * 100 for m in months], color=INK, lw=1.5, marker="o", ms=4,
+            label="raw OCM total (before post-check)")
+    ax.set_ylabel("% of tile", color=INK)
+    ax.set_title(f"{tile.tile_id}: NICFI cloud mask per month -- raw OmniCloudMask vs. after the "
+                 "temporal + speckle post-check", fontsize=12)
+    ax.legend(frameon=False, fontsize=9, loc="upper left")
+    month_axis(ax, months)
+    tidy(ax)
+    fig.tight_layout()
+    return _save(fig, out_dir / "mask_stats.png", 120)
+
+
+def fig_postcheck_frequency(tile, st, out_dir):
+    months = list(st)
+    fig, axes = plt.subplots(1, 3, figsize=(21, 6.2), gridspec_kw=dict(width_ratios=[1, 1, 1.3]))
+    for ax, name in ((axes[0], "nicfi"), (axes[1], "s2")):
+        zp = tile.cache_dir / f"postcheck_{name}.npz"
+        if not zp.exists():
+            ax.set_visible(False)
+            continue
+        z = np.load(zp)
+        im = ax.imshow(z["flag_freq"][::2, ::2], cmap="Blues", vmin=0, vmax=1, interpolation="nearest")
+        ax.contour(z["persistent"][::2, ::2], levels=[0.5], colors=C8, linewidths=0.6)
+        ax.set_title(f"{'NICFI' if name == 'nicfi' else 'Sentinel-2'}: flag frequency in "
+                     f"{int(z['mostly_clear'].sum())} mostly-clear obs\nred = persistent "
+                     f"({z['persistent'].mean():.2%} of px)", fontsize=11)
+        fig.colorbar(im, ax=ax, shrink=0.75)
+        _noticks(ax)
+    x = np.arange(len(months))
+    axes[2].bar(x, [st[m]["cleared"] * 100 for m in months], color=C1, width=0.8)
+    axes[2].set_ylabel("% of tile", color=INK)
+    axes[2].set_title("NICFI flags cleared by the post-check, per month", fontsize=11)
+    month_axis(axes[2], months, 6)
+    tidy(axes[2])
+    fig.suptitle(f"{tile.tile_id}: temporal post-check -- a spot flagged in most clear observations, "
+                 "looking the same each time, is ground", fontsize=13)
+    fig.tight_layout()
+    return _save(fig, out_dir / "postcheck_frequency.png", 100)
+
+
+def fig_mask_effect(tile, out_dir):
     by_year = defaultdict(list)
-    for w in windows:
-        if w["month"] in st["months"]:
-            by_year[w["month"][:4]].append(w)
+    for w in example_windows(tile):
+        by_year[w["month"][:4]].append(w)
     paths = []
     for year, ws in sorted(by_year.items()):
-        cols = ["original NICFI", "NICFI + cloud mask (post-checked)"]
-        if method == "s2fill":
-            cols.append("S2 used (harmonized)")
-        cols.append("reconstructed")
-        if has_extra:
-            cols.append("S2 SWIR1/NIR/Red (extra bands)")
-        cols.append("data quality: source")
-        fig, axes = plt.subplots(len(ws), len(cols), figsize=(4.4 * len(cols), 4.5 * len(ws)),
-                                 squeeze=False)
+        fig, axes = plt.subplots(len(ws), 3, figsize=(13.5, 4.5 * len(ws)), squeeze=False)
+        for i, w in enumerate(ws):
+            m = w["month"]
+            n = _crop(io_utils.read_full(tile.nicfi_path(m))[0], w)
+            z = np.load(masking.nicfi_mask_path(tile, m))
+            raw, ref = _crop(z["quality"], w), _crop(z["refined"], w)
+            cleared = _crop(masking.load_nicfi_cleared(tile, m), w)
+            lims = lims_from(n)
+            for j, (img, title) in enumerate((
+                    (rgb(n, lims), f"{m}  NICFI"),
+                    (overlay(rgb(n, lims), raw), f"raw OCM ({np.isin(raw, masking.CONTAMINATED).mean():.0%} flagged)"),
+                    (overlay(rgb(n, lims), ref, cleared),
+                     f"post-checked ({np.isin(ref, masking.CONTAMINATED).mean():.0%} flagged)"))):
+                axes[i, j].imshow(img, interpolation="nearest")
+                axes[i, j].set_title(title, fontsize=10)
+            axes[i, 0].set_ylabel(f"r{w['r0']} c{w['c0']}, ~{WIN * 4.77 / 1000:.1f} km", fontsize=9, color=INK)
+        _noticks(axes)
+        fig.legend(handles=mask_legend(), loc="lower center", ncol=5, frameon=False, fontsize=10)
+        fig.suptitle(f"{tile.tile_id} {year}: NICFI cloud mask before and after the post-check",
+                     fontsize=13)
+        fig.tight_layout(rect=(0, 0.04, 1, 0.98))
+        paths.append(_save(fig, out_dir / f"mask_effect_{year}.png", 85))
+    return paths
+
+
+# ------------------------------------------------------------ 2 reconstruct
+def fig_sources_by_month(tile, methods, out_dir):
+    fig, axes = plt.subplots(len(methods), 1, figsize=(16, 3.4 * len(methods) + 0.6), sharex=True,
+                             squeeze=False)
+    months = None
+    for ax, method in zip(axes[:, 0], methods):
+        st = _recon_stats(tile, method)
+        months = [m for m in tile.all_months if m in st["months"]]
+        x = np.arange(len(months))
+        bottom = np.zeros(len(months))
+        for code in (rc.SRC_S2_SINGLE, rc.SRC_S2_MEDIAN, rc.SRC_PHENO, rc.SRC_PHENO_BLEND,
+                     rc.SRC_CONTAMINATED):
+            name = rc.SOURCE_NAMES[code]
+            v = np.array([st["months"][m]["source"][name] for m in months]) * 100
+            if not v.any():
+                continue
+            label = name + {rc.SRC_CONTAMINATED: " (masked)" if method == "mask" else " (kept)"}.get(code, "")
+            ax.bar(x, v, bottom=bottom, color=SOURCE_COLORS[code], width=0.8, edgecolor="white",
+                   linewidth=0.5, label=label)
+            bottom += v
+        ax.set_ylabel("% of tile", color=INK)
+        ax.set_title(f"{method}", fontsize=12, loc="left", color=INK)
+        ax.legend(frameon=False, fontsize=9, loc="upper right")
+        tidy(ax)
+    month_axis(axes[-1, 0], months)
+    fig.suptitle(f"{tile.tile_id}: pixels not taken from clear NICFI, by data source "
+                 "(rest = NICFI clear / nodata border)", fontsize=13)
+    fig.tight_layout()
+    return _save(fig, out_dir / "sources_by_month.png", 110)
+
+
+def fig_compare(tile, methods, out_dir):
+    by_year = defaultdict(list)
+    for w in example_windows(tile):
+        by_year[w["month"][:4]].append(w)
+    paths = []
+    ncol = 1 + len(methods)
+    for year, ws in sorted(by_year.items()):
+        fig, axes = plt.subplots(2 * len(ws), ncol, figsize=(3.9 * ncol, 7.4 * len(ws)), squeeze=False,
+                                 gridspec_kw=dict(height_ratios=[1, 0.55] * len(ws)))
         codes = set()
         for i, w in enumerate(ws):
             m = w["month"]
-            nicfi, _, _ = io_utils.read_full(tile.nicfi_path(m))
-            data, q = _load_recon(tile, method, m)
-            n, rcn, qq = _crop(nicfi, w), _crop(data, w), _crop(q, w)
-            cleared = (qq[2] & rc.FLAG_CLEARED).astype(bool)
-            lims = lims_from(rcn[:4] if method != "mask" else n)
-            panels = [rgb(n, lims), overlay(rgb(n, lims), qq[1], cleared)]
-            if method == "s2fill":
-                filled = np.isin(qq[0], (rc.SRC_S2_SINGLE, rc.SRC_S2_MEDIAN))
-                panels.append(rgb(np.where(filled[None], rcn[:4], 0), lims))
-            panels.append(rgb(rcn[:4], lims))
-            if has_extra:
-                panels.append(stretch3(np.stack([rcn[bands.index(b)] for b in ("B11", "nir", "red")])))
-            for j, img in enumerate(panels):
-                axes[i, j].imshow(img, interpolation="nearest")
-            show_source(axes[i, -1], qq[0])
-            codes |= set(np.unique(qq[0]).tolist())
-            for j, title in enumerate(cols):
-                axes[i, j].set_title((f"{m}  " if j == 0 else "") + title +
-                                     (f" (mean score {qq[4].mean():.0f})" if j == len(cols) - 1 else ""),
-                                     fontsize=10)
-            axes[i, 0].set_ylabel(f"r{w['r0']} c{w['c0']}, ~{WIN * 4.77 / 1000:.1f} km", fontsize=9,
-                                  color=INK)
+            n = _crop(io_utils.read_full(tile.nicfi_path(m))[0], w)
+            ref = _crop(masking.load_nicfi_classes(tile, m), w)
+            lims = lims_from(n, ~np.isin(ref, masking.CONTAMINATED + (cloud_mask.NODATA,)))
+            top, bot = axes[2 * i], axes[2 * i + 1]
+            top[0].imshow(rgb(n, lims), interpolation="nearest")
+            top[0].set_title(f"{m}  original NICFI", fontsize=10)
+            bot[0].imshow(overlay(rgb(n, lims), ref), interpolation="nearest")
+            bot[0].set_title("cloud mask (post-checked)", fontsize=9)
+            for j, method in enumerate(methods, start=1):
+                data, q = _load_recon(tile, method, m)
+                d, qq = _crop(data, w), _crop(q, w)
+                top[j].imshow(rgb(d[:4], lims), interpolation="nearest")
+                top[j].set_title(method, fontsize=11, weight="bold")
+                show_source(bot[j], qq[0])
+                bot[j].set_title(f"source (mean score {qq[4].mean():.0f})", fontsize=9)
+                codes |= set(np.unique(qq[0]).tolist())
+            top[0].set_ylabel(f"r{w['r0']} c{w['c0']}", fontsize=9, color=INK)
         _noticks(axes)
-        fig.legend(handles=mask_legend(), loc="lower left", ncol=5, frameon=False, fontsize=10,
-                   title="cloud mask", bbox_to_anchor=(0.02, 0))
+        fig.legend(handles=mask_legend(), loc="lower left", ncol=3, frameon=False, fontsize=9,
+                   title="cloud mask", bbox_to_anchor=(0.01, 0))
         fig.legend(handles=source_legend(sorted(codes)), loc="lower right", ncol=4, frameon=False,
-                   fontsize=10, title="data quality: source", bbox_to_anchor=(0.98, 0))
-        fig.suptitle(f"{tile.tile_id} {year} [{method}]: cloudiest example windows "
-                     "(shared stretch per row)", fontsize=13)
-        fig.tight_layout(rect=(0, 0.05, 1, 0.98))
-        paths.append(_save(fig, out_dir / f"clouds_{year}.png", 85))
+                   fontsize=9, title="data quality: source", bbox_to_anchor=(0.99, 0))
+        fig.suptitle(f"{tile.tile_id} {year}: monthly reconstruction, methods side by side "
+                     "(shared stretch per row; black = nodata)", fontsize=13)
+        fig.tight_layout(rect=(0, 0.035, 1, 0.985))
+        paths.append(_save(fig, out_dir / f"compare_{year}.png", 80))
     return paths
 
 
-def fig_recon_full_tile(tile, method, st, out_dir, n=3):
-    months = [m for m in tile.months if m in st["months"]]
-
-    def dirty(m):
-        s = st["months"][m]["source"]
-        return sum(v for k, v in s.items() if k not in ("NICFI clear", "nodata"))
-    worst = sorted(sorted(months, key=lambda m: -dirty(m))[:n])
-    fig, axes = plt.subplots(len(worst), 4, figsize=(24, 6 * len(worst)), squeeze=False)
-    codes = set()
+def fig_compare_full_tile(tile, methods, mask_st, out_dir, n=2):
+    worst = sorted(sorted(mask_st, key=lambda m: -mask_st[m]["raw"])[:n])
+    ncol = 1 + len(methods)
+    fig, axes = plt.subplots(len(worst), ncol, figsize=(5.2 * ncol, 5.6 * len(worst)), squeeze=False)
     for i, m in enumerate(worst):
-        nicfi, _, _ = io_utils.read_full(tile.nicfi_path(m))
-        data, q = _load_recon(tile, method, m)
-        lims = lims_from(nicfi, q[0] == rc.SRC_NICFI)
-        axes[i, 0].imshow(rgb(nicfi[:, ::2, ::2], lims)); axes[i, 0].set_title(f"{m} original NICFI")
-        axes[i, 1].imshow(rgb(data[:4, ::2, ::2], lims)); axes[i, 1].set_title(f"{m} [{method}]")
-        show_source(axes[i, 2], q[0, ::2, ::2])
-        codes |= set(np.unique(q[0]).tolist())
-        axes[i, 2].set_title("data quality: source")
-        im = axes[i, 3].imshow(q[4, ::2, ::2], cmap="Blues", vmin=0, vmax=100, interpolation="nearest")
-        axes[i, 3].set_title(f"score (mean {q[4].mean():.0f}/100)")
-        fig.colorbar(im, ax=axes[i, 3], shrink=0.7)
+        nicfi = io_utils.read_full(tile.nicfi_path(m))[0]
+        ref = masking.load_nicfi_classes(tile, m)
+        lims = lims_from(nicfi, ~np.isin(ref, masking.CONTAMINATED + (cloud_mask.NODATA,)))
+        axes[i, 0].imshow(rgb(nicfi[:, ::3, ::3], lims))
+        axes[i, 0].set_title(f"{m}  original NICFI ({mask_st[m]['raw']:.0%} flagged raw)", fontsize=11)
+        for j, method in enumerate(methods, start=1):
+            data, _ = _load_recon(tile, method, m)
+            axes[i, j].imshow(rgb(data[:4, ::3, ::3], lims))
+            axes[i, j].set_title(method, fontsize=12, weight="bold")
     _noticks(axes)
-    fig.legend(handles=source_legend(sorted(codes)), loc="lower center", ncol=6, frameon=False,
-               fontsize=11)
-    fig.suptitle(f"{tile.tile_id} [{method}]: most contaminated months, whole tile", fontsize=14)
-    fig.tight_layout(rect=(0, 0.02, 1, 0.98))
-    return _save(fig, out_dir / "full_tile.png", 75)
+    fig.suptitle(f"{tile.tile_id}: most contaminated months, whole tile, methods side by side",
+                 fontsize=14)
+    fig.tight_layout()
+    return _save(fig, out_dir / "compare_full_tile.png", 70)
 
 
-# ---------------------------------------------------------------- composite
-def _area_grid(tile, w, rows, row_labels, title, path, extra_row=None):
-    """rows: list of lists of (4,h,w) crops or None, 12 per row (or fewer)."""
-    n_cols = max(len(r) for r in rows)
-    n_rows = len(rows) + (1 if extra_row is not None else 0)
-    fig, axes = plt.subplots(n_rows, n_cols, figsize=(2 * n_cols, 2.1 * n_rows + 1.2),
-                             gridspec_kw=dict(hspace=0.08, wspace=0.04, left=0.05, right=0.99,
-                                              top=0.93, bottom=0.1 if extra_row else 0.03),
+# -------------------------------------------------------------- 3 composite
+def _composite_paths(tile, kind, source):
+    d = tile.composite_dir(kind, source)
+    keys = [f"m{k:02d}" for k in range(1, 13)] if kind == "typical_year" else tile.years
+    return {k: d / f"{tile.tile_id}_{k}.tif" for k in keys if (d / f"{tile.tile_id}_{k}.tif").exists()}
+
+
+def _grid_figure(tile, kind, sources, title, path, step=6):
+    imgs = {s: {k: io_utils.read_full(p)[0][:, ::step, ::step]
+                for k, p in _composite_paths(tile, kind, s).items()} for s in sources}
+    keys = sorted({k for v in imgs.values() for k in v})
+    lims = lims_stack(np.stack([a for v in imgs.values() for a in v.values()]))
+    fig, axes = plt.subplots(len(sources), len(keys), figsize=(2.3 * len(keys), 2.45 * len(sources) + 0.6),
                              squeeze=False)
-    stack = [c for r in rows[-1:] for c in r if c is not None]
-    lims = lims_stack(np.stack(stack)) if stack else np.array([[0, 1]] * 3, float)
-    for i, row in enumerate(rows):
-        for j, crop in enumerate(row):
-            if crop is not None:
-                axes[i, j].imshow(rgb(crop, lims), interpolation="nearest")
-    if extra_row is not None:
-        imgs, vmax, label = extra_row
-        for j, img in enumerate(imgs):
-            im = axes[-1, j].imshow(img, cmap="Blues", vmin=0, vmax=vmax, interpolation="nearest")
-        cb = fig.colorbar(im, ax=axes[-1, :].tolist(), orientation="horizontal", fraction=0.04,
-                          pad=0.25, aspect=60)
-        cb.set_label(label, fontsize=9)
-    for i, label in enumerate(row_labels):
-        axes[i, 0].set_ylabel(label, fontsize=10, color=INK)
+    for i, s in enumerate(sources):
+        for j, k in enumerate(keys):
+            if k in imgs[s]:
+                axes[i, j].imshow(rgb(imgs[s][k], lims))
+            if i == 0:
+                axes[i, j].set_title(MONTH_ABBR[int(k[1:]) - 1] if kind == "typical_year" else k, fontsize=11)
+        axes[i, 0].set_ylabel(SOURCE_LABEL[s], fontsize=11, color=INK)
     _noticks(axes)
     fig.suptitle(title, fontsize=13)
+    fig.tight_layout()
     return _save(fig, path, 80)
 
 
-def figs_typical_year(tile, out_dir):
-    d = tile.composite_dir("typical_year")
-    st = json.loads((d / "stats.json").read_text())["months"]
-    ks = sorted(int(k) for k in st)
-    x = np.arange(len(ks))
-    fig, ax = plt.subplots(figsize=(12, 4.5))
-    bottom = np.zeros(len(ks))
-    for key, col, label in (("adjacent", C1, "clear only in adjacent months (tier 2)"),
-                            ("least_bad", C8, "never clear: least-contaminated obs (tier 3)")):
-        v = np.array([st[str(k)][key] for k in ks]) * 100
-        ax.bar(x, v, bottom=bottom, color=col, width=0.8, label=label, edgecolor="white", linewidth=0.5)
-        bottom += v
-    ax.set_xticks(x); ax.set_xticklabels([MONTH_ABBR[k - 1] for k in ks])
-    ax.set_ylabel("% of tile", color=INK)
-    ax.set_title(f"{tile.tile_id}: typical-year composite -- pixels not clear in any observation "
-                 "of that calendar month (rest = tier 1)", fontsize=11)
-    ax.legend(frameon=False, fontsize=9)
-    tidy(ax)
+def fig_coverage(tile, ty_sources, an_sources, out_dir):
+    fig, axes = plt.subplots(1, 2, figsize=(16, 4.4), gridspec_kw=dict(width_ratios=[2.2, 1]))
+    cols = dict(zip(cp.SOURCES, (INK, C8, C1, C7)))
+    for s in ty_sources:
+        st = json.loads((tile.composite_dir("typical_year", s) / "stats.json").read_text())["months"]
+        ks = sorted(int(k) for k in st)
+        axes[0].plot(ks, [100 * st[str(k)]["same"] for k in ks], color=cols[s], lw=2, marker="o", ms=6,
+                     ls="--" if s == "nicfi" else "-", label=SOURCE_LABEL[s])
+    axes[0].set_xticks(range(1, 13)); axes[0].set_xticklabels(MONTH_ABBR)
+    axes[0].set_ylabel("% of tile from usable same-month obs", color=INK)
+    axes[0].set_ylim(90, 100.5)
+    axes[0].set_title("typical year", fontsize=12, loc="left")
+    axes[0].legend(frameon=False, fontsize=9)
+    tidy(axes[0])
+    for s in an_sources:
+        st = json.loads((tile.composite_dir("annual", s) / "stats.json").read_text())["years"]
+        ys = sorted(st)
+        axes[1].plot(ys, [st[y]["mean_months_used"] for y in ys], color=cols[s], lw=2, marker="o", ms=6,
+                     ls="--" if s == "nicfi" else "-", label=SOURCE_LABEL[s])
+    axes[1].set_ylabel("usable months per pixel (of 12)", color=INK)
+    axes[1].set_ylim(0, 12.5)
+    axes[1].set_title("annual", fontsize=12, loc="left")
+    axes[1].legend(frameon=False, fontsize=9)
+    tidy(axes[1])
+    fig.suptitle(f"{tile.tile_id}: how much usable data (score >= threshold) each composite rests on "
+                 "(raw NICFI and mask coincide by construction; ~1% of the tile is nodata border)",
+                 fontsize=12)
     fig.tight_layout()
-    paths = [_save(fig, out_dir / "typical_year_tiers.png", 120)]
+    return _save(fig, out_dir / "coverage.png", 110)
 
-    comps = {k: io_utils.read_full(d / f"{tile.tile_id}_m{k:02d}.tif")[0] for k in ks}
-    quals = {k: io_utils.read_full(d / f"{tile.tile_id}_m{k:02d}_quality.tif")[0] for k in ks}
-    lims = lims_stack(np.stack([comps[k][:, ::8, ::8] for k in ks]))
-    fig, axes = plt.subplots(3, 4, figsize=(20, 15.5))
-    for k, ax in zip(ks, axes.ravel()):
-        ax.imshow(rgb(comps[k][:, ::3, ::3], lims))
-        ax.set_title(f"{MONTH_ABBR[k - 1]}  (tier 1: {st[str(k)]['same']:.1%})", fontsize=12)
-    _noticks(axes)
-    years = sorted({m[:4] for m in tile.all_months})
-    fig.suptitle(f"{tile.tile_id}: typical year from NICFI {years[0]}-{years[-1]} only "
-                 "(shared stretch)", fontsize=15)
-    fig.tight_layout()
-    paths.append(_save(fig, out_dir / "typical_year_full_tile.png", 80))
 
+def fig_composite_areas(tile, ty_sources, an_sources, out_dir):
+    sources = [s for s in cp.SOURCES if s in ty_sources or s in an_sources]
     chosen = {}
     for w in example_windows(tile):
         chosen.setdefault(w["month"][:4], w)
+    paths = []
     for year, w in sorted(chosen.items()):
-        rows, labels = [], []
-        for y in years:
-            row = []
-            for k in range(1, 13):
-                m = f"{y}-{k:02d}"
-                row.append(_crop(io_utils.read_full(tile.nicfi_path(m))[0], w)
-                           if m in tile.all_months else None)
-            rows.append(row)
-            labels.append(y)
-        rows.append([_crop(comps[k], w) if k in comps else None for k in range(1, 13)])
-        labels.append("typical-year\ncomposite")
-        ncl = [_crop(quals[k][1], w) for k in ks]
-        paths.append(_area_grid(
-            tile, w, rows, labels + [f"clear years\n(of {len(years)})"],
-            f"{tile.tile_id} area r{w['r0']} c{w['c0']} (~{w['win'] * 4.77 / 1000:.1f} km): every NICFI "
-            f"month vs. the typical-year composite (columns Jan..Dec)",
-            out_dir / f"typical_year_area_{year}_r{w['r0']}_c{w['c0']}.png",
-            extra_row=(ncl, len(years), "clear same-month observations behind each composite pixel")))
-    return paths
-
-
-def figs_annual(tile, source, out_dir):
-    d = tile.composite_dir("annual", source)
-    st = json.loads((d / "stats.json").read_text())
-    years = sorted(st["years"])
-    comps = {y: io_utils.read_full(d / f"{tile.tile_id}_{y}.tif")[0] for y in years}
-    lims = lims_stack(np.stack([comps[y][:, ::8, ::8] for y in years]))
-    fig, axes = plt.subplots(1, len(years), figsize=(5 * len(years), 5.6), squeeze=False)
-    for y, ax in zip(years, axes[0]):
-        ax.imshow(rgb(comps[y][:, ::3, ::3], lims))
-        ax.set_title(f"{y}  (score>={st['min_score']}: {st['years'][y]['tier_ok']:.1%})", fontsize=12)
-    _noticks(axes)
-    fig.suptitle(f"{tile.tile_id}: annual composites from [{source}], stat={st['stat']} "
-                 "(shared stretch)", fontsize=14)
-    fig.tight_layout()
-    paths = [_save(fig, out_dir / f"annual_{source}_full_tile.png", 80)]
-
-    chosen = {}
-    for w in example_windows(tile):
-        chosen.setdefault(w["month"][:4], w)
-    rows = [[_crop(comps[y], w) for y in years] for w in chosen.values()]
-    fig, axes = plt.subplots(len(rows), len(years), figsize=(3 * len(years), 3.1 * len(rows)),
-                             squeeze=False)
-    for i, (row, w) in enumerate(zip(rows, chosen.values())):
-        lims = lims_stack(np.stack(row))
-        for j, crop in enumerate(row):
-            axes[i, j].imshow(rgb(crop, lims), interpolation="nearest")
-            if i == 0:
-                axes[i, j].set_title(years[j], fontsize=11)
-        axes[i, 0].set_ylabel(f"r{w['r0']} c{w['c0']}", fontsize=9, color=INK)
-    _noticks(axes)
-    fig.suptitle(f"{tile.tile_id}: annual composites [{source}] on the example areas", fontsize=13)
-    fig.tight_layout()
-    paths.append(_save(fig, out_dir / f"annual_{source}_areas.png", 85))
+        ty = {s: {k: _crop(io_utils.read_full(p)[0], w) for k, p in _composite_paths(tile, "typical_year", s).items()}
+              for s in ty_sources}
+        an = {s: {k: _crop(io_utils.read_full(p)[0], w) for k, p in _composite_paths(tile, "annual", s).items()}
+              for s in an_sources}
+        mk = [f"m{k:02d}" for k in range(1, 13)]
+        yk = tile.years
+        all_crops = [a for v in list(ty.values()) + list(an.values()) for a in v.values()]
+        lims = lims_stack(np.stack(all_crops))
+        ncol = len(mk) + 1 + len(yk)
+        fig, axes = plt.subplots(len(sources), ncol, figsize=(1.9 * ncol, 2.05 * len(sources) + 0.9),
+                                 squeeze=False, gridspec_kw=dict(wspace=0.04, hspace=0.06, left=0.06,
+                                                                 right=0.995, top=0.86, bottom=0.02))
+        for i, s in enumerate(sources):
+            for j, k in enumerate(mk):
+                if k in ty.get(s, {}):
+                    axes[i, j].imshow(rgb(ty[s][k], lims), interpolation="nearest")
+            axes[i, len(mk)].axis("off")
+            for j, k in enumerate(yk, start=len(mk) + 1):
+                if k in an.get(s, {}):
+                    axes[i, j].imshow(rgb(an[s][k], lims), interpolation="nearest")
+            axes[i, 0].set_ylabel(SOURCE_LABEL[s], fontsize=10, color=INK)
+        for j, k in enumerate(mk):
+            axes[0, j].set_title(MONTH_ABBR[j], fontsize=10)
+        for j, k in enumerate(yk, start=len(mk) + 1):
+            axes[0, j].set_title(k, fontsize=10)
+        _noticks(axes)
+        fig.text(0.06 + 0.94 * len(mk) / ncol / 2, 0.95, "typical year (12 months, all years)",
+                 ha="center", fontsize=12, weight="bold", color=C2)
+        fig.text(0.06 + 0.94 * (len(mk) + 1 + len(yk) / 2) / ncol, 0.95, "annual", ha="center",
+                 fontsize=12, weight="bold", color=C2)
+        fig.suptitle(f"{tile.tile_id} area r{w['r0']} c{w['c0']} (~{w['win'] * 4.77 / 1000:.1f} km): "
+                     "composites by source (shared stretch)", fontsize=13, y=0.995)
+        paths.append(_save(fig, out_dir / f"area_{year}_r{w['r0']}_c{w['c0']}.png", 80))
     return paths
 
 
 # ------------------------------------------------------------------- runner
-def run_visualize(tile: cfg.Tile, what: str, method: str = None, source: str = None, log=print):
-    if what == "preprocess":
-        out = tile.fig_dir("preprocess")
-        paths = [fig_postcheck(tile, out), fig_s2_coverage(tile, out)]
-    elif what == "reconstruct":
-        out = tile.fig_dir(f"reconstruct/{method}")
-        st = _recon_stats(tile, method)
-        paths = [fig_recon_overview(tile, method, st, out)]
-        if method == "s2fill":
-            paths.append(fig_harmonization(tile, out))
-        paths += fig_recon_windows(tile, method, st, out)
-        paths.append(fig_recon_full_tile(tile, method, st, out))
-    elif what == "typical-year":
-        paths = figs_typical_year(tile, tile.fig_dir("composite"))
-    elif what == "annual":
-        paths = figs_annual(tile, source, tile.fig_dir("composite"))
-    else:
-        raise ValueError(what)
+def run_visualize(tile: cfg.Tile, what: str = "all", log=print):
+    paths = []
+    if what in ("cloudmask", "all"):
+        out = tile.fig_dir("1_cloudmask")
+        st = _mask_month_stats(tile)
+        paths += [fig_mask_stats(tile, st, out), fig_postcheck_frequency(tile, st, out)]
+        paths += fig_mask_effect(tile, out)
+        paths.append(fig_s2_coverage(tile, out))
+    if what in ("reconstruct", "all"):
+        methods = _methods(tile)
+        if methods:
+            out = tile.fig_dir("2_reconstruct")
+            paths.append(fig_sources_by_month(tile, methods, out))
+            if "s2fill" in methods:
+                paths.append(fig_harmonization(tile, out))
+            paths += fig_compare(tile, methods, out)
+            paths.append(fig_compare_full_tile(tile, methods, _mask_month_stats(tile), out))
+    if what in ("composite", "all"):
+        ty, an = _sources(tile, "typical_year"), _sources(tile, "annual")
+        if ty or an:
+            out = tile.fig_dir("3_composite")
+            if ty:
+                paths.append(_grid_figure(tile, "typical_year", ty, f"{tile.tile_id}: typical-year "
+                                          "monthly composites by source (shared stretch)",
+                                          out / "typical_year.png"))
+            if an:
+                paths.append(_grid_figure(tile, "annual", an, f"{tile.tile_id}: annual composites by "
+                                          "source (shared stretch)", out / "annual.png", step=4))
+            paths.append(fig_coverage(tile, ty, an, out))
+            paths += fig_composite_areas(tile, ty, an, out)
     for p in paths:
         if p:
             log(f"  -> {p.relative_to(tile.out_root)}")

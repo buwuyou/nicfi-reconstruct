@@ -59,7 +59,7 @@ above and the later Sentinel-2 work into stages with options --
 **preprocess** (OmniCloudMask on NICFI and raw Sentinel-2, a temporal +
 spatial post-check of both mask series, monthly clear S2 composites),
 **reconstruct** (`--method mask` | `s2fill [--add-s2-bands]` | `phenology`)
-and **composite** (`--type annual --source ...` | `typical-year`) -- every
+and **composite** (`--type annual | typical-year --source nicfi|mask|s2fill|phenology`) -- every
 product with a per-pixel data-quality layer. Tile-agnostic (`--tile <ID>`),
 run end to end on tile D17. Usage, options and results: `docs/nicfirecon.md`.
 The per-site scripts below (`scripts/vietnam/`, `scripts/amazon/`) are kept

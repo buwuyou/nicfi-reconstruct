@@ -19,10 +19,11 @@ preprocess   --steps mask,postcheck,s2composite (default: all)
              Sentinel-2 steps are skipped if the tile has no S2 frames.
 reconstruct  --method mask | s2fill | phenology   (one product per method,
              reconstructed/<method>/, each with a 5-band quality layer)
-composite    --type annual       --source nicfi|mask|s2fill|phenology
-             --type typical-year (from all years of NICFI observations)
-visualize    re-draw figures only: --what preprocess | reconstruct (--method)
-             | typical-year | annual (--source)
+composite    --type annual | typical-year  --source nicfi|mask|s2fill|phenology
+             (annual: one image per year; typical-year: 12 monthly images from
+             all years; from raw NICFI + masks or any method's output)
+visualize    re-draw figures only: --what cloudmask | reconstruct | composite | all
+             (each section compares every method/source available on disk)
 """
 import argparse
 import sys
@@ -64,7 +65,7 @@ def do_preprocess(tile, steps=("mask", "postcheck", "s2composite"), sensors=None
         _log("preprocess/s2composite")
         s2.run_s2_composites(tile, s2_clear_thresh, s2_buffer_px, _log)
     if figures:
-        viz.run_visualize(tile, "preprocess", log=_log)
+        viz.run_visualize(tile, "cloudmask", log=_log)
 
 
 def do_reconstruct(tile, method, add_s2_bands=False, device="cuda", n_clusters=10, refiner=True,
@@ -73,22 +74,19 @@ def do_reconstruct(tile, method, add_s2_bands=False, device="cuda", n_clusters=1
     reconstruct.run_reconstruct(tile, method, add_s2_bands, device, n_clusters, refiner,
                                 refiner_iters, _log)
     if figures:
-        viz.run_visualize(tile, "reconstruct", method=method, log=_log)
+        viz.run_visualize(tile, "reconstruct", log=_log)
 
 
 def do_composite(tile, type, source="nicfi", stat="lowblue", min_score=50, figures=True):
+    _log(f"composite --type {type} --source {source} (stat {stat}, min score {min_score})")
     if type == "typical-year":
-        _log(f"composite --type typical-year (stat {stat})")
-        composite.run_typical_year(tile, stat, _log)
-        if figures:
-            viz.run_visualize(tile, "typical-year", log=_log)
+        composite.run_typical_year(tile, source, stat, min_score, _log)
     elif type == "annual":
-        _log(f"composite --type annual --source {source} (stat {stat}, min score {min_score})")
         composite.run_annual(tile, source, stat, min_score, _log)
-        if figures:
-            viz.run_visualize(tile, "annual", source=source, log=_log)
     else:
         raise ValueError(f"unknown composite type {type!r}")
+    if figures:
+        viz.run_visualize(tile, "composite", log=_log)
 
 
 def do_run(config_path: Path):
@@ -170,16 +168,14 @@ def main(argv=None):
 
     p = cfg.add_tile_args(sub.add_parser("composite", help="annual / typical-year composites"))
     p.add_argument("--type", required=True, choices=("annual", "typical-year"))
-    p.add_argument("--source", default="nicfi", choices=composite.ANNUAL_SOURCES,
-                   help="annual: monthly input (raw NICFI+masks or a reconstruction method)")
+    p.add_argument("--source", default="nicfi", choices=composite.SOURCES,
+                   help="monthly input: raw NICFI + masks, or a reconstruction method's output")
     p.add_argument("--stat", default="lowblue", choices=composite.STATS)
-    p.add_argument("--min-score", type=int, default=50, help="annual: min quality score to use a month")
+    p.add_argument("--min-score", type=int, default=50, help="min quality score to use an observation")
     p.add_argument("--no-figures", action="store_true")
 
     p = cfg.add_tile_args(sub.add_parser("visualize", help="re-draw QA figures only"))
-    p.add_argument("--what", required=True, choices=("preprocess", "reconstruct", "typical-year", "annual"))
-    p.add_argument("--method", choices=reconstruct.METHODS)
-    p.add_argument("--source", choices=composite.ANNUAL_SOURCES)
+    p.add_argument("--what", default="all", choices=("cloudmask", "reconstruct", "composite", "all"))
 
     p = sub.add_parser("run", help="run a chain of stages from a YAML config")
     p.add_argument("--config", required=True, type=Path)
@@ -204,7 +200,7 @@ def main(argv=None):
     elif a.cmd == "composite":
         do_composite(tile, a.type, a.source, a.stat, a.min_score, not a.no_figures)
     elif a.cmd == "visualize":
-        viz.run_visualize(tile, a.what, a.method, a.source, _log)
+        viz.run_visualize(tile, a.what, log=_log)
     _log(f"done in {(time.time() - t0) / 60:.1f} min")
 
 

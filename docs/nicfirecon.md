@@ -13,7 +13,7 @@ python -m src.nicfirecon download    --tile D99 --start 2021-01 --end 2025-12 \
 python -m src.nicfirecon preprocess  --tile D17          # masks, post-check, S2 composites
 python -m src.nicfirecon reconstruct --tile D17 --method s2fill --add-s2-bands
 python -m src.nicfirecon reconstruct --tile D17 --method phenology
-python -m src.nicfirecon composite   --tile D17 --type typical-year
+python -m src.nicfirecon composite   --tile D17 --type typical-year --source phenology
 python -m src.nicfirecon composite   --tile D17 --type annual --source s2fill
 python -m src.nicfirecon run --config configs/D17.yaml   # the whole chain from one file
 python -m src.nicfirecon <stage> --help                  # every option
@@ -26,17 +26,24 @@ python -m src.nicfirecon <stage> --help                  # every option
 | `reconstruct` | `--method mask` | contaminated + nodata NICFI pixels set to nodata; the conservative product |
 | | `--method s2fill [--add-s2-bands]` | contaminated pixels replaced by same-month harmonized S2; `--add-s2-bands` appends S2 B5/B6/B7/B8A/B11/B12 (10 bands) |
 | | `--method phenology [--no-refiner] [--n-clusters]` | the temporal method of `docs/amazon.md` (harmonic phenology + cluster priors + continuous confidence + DL refiner) on the whole tile series |
-| `composite` | `--type annual --source nicfi\|mask\|s2fill\|phenology [--stat lowblue\|median] [--min-score]` | one image per year from any monthly source, using its quality score |
-| | `--type typical-year [--stat]` | 12 monthly images from all years of NICFI only |
-| `visualize` | `--what preprocess\|reconstruct\|typical-year\|annual` | re-draw figures (every stage draws its own unless `--no-figures`) |
+| `composite` | `--type annual\|typical-year --source nicfi\|mask\|s2fill\|phenology [--stat lowblue\|median] [--min-score]` | annual: one image per year; typical-year: 12 monthly images from all years -- from raw NICFI + masks or any method's monthly output, using its quality score |
+| `visualize` | `--what cloudmask\|reconstruct\|composite\|all` | re-draw figures; each section compares every method/source on disk (every stage draws its own section unless `--no-figures`) |
 
 Inputs (defaults, overridable with `--nicfi-dir/--s2-dir/--data-root`):
 `<data-root>/<TILE>/*YYYY-MM.tif` (NICFI) and optionally
 `<data-root>/<TILE>_S2/YYYY-MM-DD.tif` (raw Sentinel-2, band descriptions
 B2..B12). Outputs in `outputs/nicfirecon/<TILE>/`: `cache/`,
-`reconstructed/<method>/`, `composites/{annual/<source>,typical_year}/`,
-`figures/{preprocess,reconstruct/<method>,composite}/`. Every product
+`reconstructed/<method>/`, `composites/{annual,typical_year}/<source>/`,
+`figures/{1_cloudmask,2_reconstruct,3_composite}/`. Every product
 GeoTIFF has named bands and a `_quality.tif` next to it.
+
+## Figures (`outputs/nicfirecon/<tile>/figures/`)
+
+| section | figures | shows |
+|---|---|---|
+| `1_cloudmask/` | `mask_stats.png`, `postcheck_frequency.png`, `mask_effect_<year>.png`, `s2_coverage.png` | NICFI cloud classes per month, raw OCM vs post-checked; where and how often the post-check clears flags; example windows before/after; S2 composite coverage |
+| `2_reconstruct/` | `sources_by_month.png`, `harmonization.png`, `compare_<year>.png`, `compare_full_tile.png` | the three methods side by side on the same cloudy months, each with its quality-source map |
+| `3_composite/` | `typical_year.png`, `annual.png`, `coverage.png`, `area_<year>_*.png` | typical-year and annual composites, one row per source |
 
 ## D17 results by method (`configs/D17.yaml`, 42 min end to end on one RTX 3090)
 
@@ -57,9 +64,14 @@ Mean over 60 months, % of the tile by data source (from each method's
   the `phenology blend` source say how much.
 - Composites: typical year 98.8-98.9% clear same-month coverage per
   calendar month; annual from `s2fill` / `phenology`: 99.0 / 98.9% of
-  pixels from months scoring >= 50, ~10-12 usable months per pixel. The
-  2021 annual has a darker north-east patch where the least-hazy rule picks
-  dark observations.
+  pixels from months scoring >= 50, ~10-12 usable months per pixel. A
+  darker 2021 patch in the first version came from the least-hazy rule
+  picking a defective dark scene -- fixed by the outlier filter below.
+  What remains: the 2021 annual composites are darker over the eastern half
+  of the tile in every source -- several 2021 NICFI scenes there are
+  uniformly darker (tile median blue 178 in 2021-11 vs ~220-250 in other
+  months), within the outlier bounds, and annual composites deliberately
+  don't normalize across months (that would erase real seasonality).
 - Found during the refactor: the S2 haze-test blue references were cached
   once and never rebuilt, so they still reflected the raw masks after the
   post-check changed them; `s2composite` now rebuilds them every run. The
@@ -143,7 +155,7 @@ no ground truth behind it. Figures in `.../figures/`.
   earlier tile: faithful to its own input but no better than bilinear
   against NICFI, at ~17 GPU-min/month -- see `docs/super-resolution.md`.
 
-## Results on D17, s2fill (`figures/reconstruct/s2fill/`, `figures/preprocess/postcheck.png`)
+## Results on D17, s2fill (`figures/2_reconstruct/`, `figures/1_cloudmask/`)
 
 - **Works where S2 saw the ground.** Thick cloud removed cleanly with no
   visible seam in e.g. 2024-04 (S2 median), 2025-02 (single frame
@@ -170,7 +182,7 @@ no ground truth behind it. Figures in `.../figures/`.
   "typical appearance" and could be overridden too.
 - No independent ground truth: judged visually and via the fit statistics.
 
-## Typical-year composite: 12 months from all NICFI years (`composite --type typical-year`)
+## Typical-year composite: 12 months from all years (`composite --type typical-year`)
 
 `src/nicfirecon/composite.py` builds 12
 monthly images from NICFI only, no Sentinel-2: for calendar month k, every
@@ -185,6 +197,13 @@ pixel cloudy in one year is usually clear in another.
   (4 of 5 Februaries carry undetected thin haze, so the median *is* haze);
   the lower quartile with floor() is the minimum for 3-4 clear years and
   left dark shadow blotches in the wet-season months.
+- Before that pick, per-pixel spectral outliers are dropped (blue < 0.5x
+  or red > 3x the pixel's median over its usable observations, when it has
+  >= 3): the least-hazy rule *prefers* low blue, so on D17 a defective
+  2021-11 NICFI scene (blue 79 / red 85 DN vs ~215 / ~230, NIR normal,
+  called 100% clear by OCM) was being picked for the 2021 annual composite
+  as a black blob, and a red artifact likewise. Same rule for annual and
+  typical-year composites.
 - Every year is first normalized onto a first-pass composite with the same
   local quantile matching (NICFI -> NICFI), so pixels drawn from different
   years don't turn into patchiness. Fitted slopes are hard-clamped to
@@ -194,12 +213,12 @@ pixel cloudy in one year is usually clear in another.
 - Fallbacks, per pixel (`_quality.tif` band `tier`): clear same month ->
   clear adjacent months -> least-contaminated same-month observation.
 
-Outputs: `composites/typical_year/<tile>_m<MM>.tif` + `_quality.tif`
-(tier, n_clear_same, n_clear_adjacent); figures
-`figures/composite/typical_year_{tiers,full_tile,area_*}.png` -- the area
-figures use the same example windows as the reconstruction figures (every
-year's original NICFI for each month, the composite, and the clear-year
-count behind it).
+Outputs: `composites/typical_year/<source>/<tile>_m<MM>.tif` + `_quality.tif`
+(tier, n_usable_same, n_usable_adjacent) for every source -- raw NICFI
+(described here) or any method's monthly output (same rules, usable =
+quality score >= `--min-score`); figures in `figures/3_composite/` compare
+the sources side by side (`typical_year.png`, `annual.png`, `coverage.png`,
+and per example area `area_*.png`).
 
 **D17:** every calendar month is 98.8-98.9% filled from clear same-month
 observations (the remaining ~1.05% is the tile-edge nodata border; adjacent
