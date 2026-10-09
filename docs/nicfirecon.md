@@ -43,7 +43,7 @@ GeoTIFF has named bands and a `_quality.tif` next to it.
 |---|---|---|
 | `1_cloudmask/` | `mask_stats.png`, `postcheck_frequency.png`, `mask_effect_<year>.png`, `s2_coverage.png` | NICFI cloud classes per month, raw OCM vs post-checked; where and how often the post-check clears flags; example windows before/after; S2 composite coverage |
 | `2_reconstruct/` | `sources_by_month.png`, `harmonization.png`, `compare_<year>.png`, `compare_full_tile.png` | the three methods side by side on the same cloudy months, each with its quality-source map |
-| `3_composite/` | `typical_year.png`, `annual.png`, `coverage.png`, `area_<year>_*.png` | typical-year and annual composites, one row per source |
+| `3_composite/` | `typical_year.png`, `annual.png`, `coverage.png`, `area_<year>_*.png` | the raw-NICFI composites as reference, then each method's relative-difference map (side by side the composites look near-identical; the differences are where the methods matter) |
 
 ## D17 results by method (`configs/D17.yaml`, 42 min end to end on one RTX 3090)
 
@@ -72,6 +72,15 @@ Mean over 60 months, % of the tile by data source (from each method's
   uniformly darker (tile median blue 178 in 2021-11 vs ~220-250 in other
   months), within the outlier bounds, and annual composites deliberately
   don't normalize across months (that would erase real seasonality).
+- **Composites barely depend on the method where data is plentiful.** With
+  10-12 usable months per pixel-year and 3-5 clear years per calendar
+  month, compositing alone removes almost all cloud. Share of pixels whose
+  composite differs > 5% from the raw-NICFI one: `mask` ~0 (by
+  construction); typical year, wet season (Dec-Feb, Sep) 11-24% for
+  `s2fill` and 15-33% for `phenology`, dry season (Apr-Aug) 1-6%; annual
+  2-7%, except `phenology` 2024 (14%, the south of the tile around the
+  fire-smoke months). The reconstruction methods matter most for single
+  months and for wet-season typical-year months.
 - Found during the refactor: the S2 haze-test blue references were cached
   once and never rebuilt, so they still reflected the raw masks after the
   post-check changed them; `s2composite` now rebuilds them every run. The
