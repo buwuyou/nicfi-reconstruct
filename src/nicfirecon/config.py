@@ -16,8 +16,8 @@ exactly what the `download` stage writes:
 Output layout, outputs/nicfirecon/<TILE>/:
     cache/                     masks, S2 composites, fits, stats (regenerable)
     reconstructed/<method>/    monthly products: mask | s2fill | phenology
-    composites/annual/<source>/   one image per calendar year
-    composites/typical_year/      12 monthly images from all years
+    composites/annual/<stat>/<source>/        one image per calendar year
+    composites/typical_year/<stat>/<source>/  12 monthly images from all years
     figures/<stage>/           QA figures (tracked in git)
 """
 import argparse
@@ -104,8 +104,8 @@ class Tile:
     def recon_dir(self, method: str) -> Path:
         return self._mkdir("reconstructed", method)
 
-    def composite_dir(self, kind: str, source: Optional[str] = None) -> Path:
-        return self._mkdir("composites", kind, *([source] if source else []))
+    def composite_dir(self, kind: str, source: str, stat: str) -> Path:
+        return self._mkdir("composites", kind, stat, source)
 
     def fig_dir(self, stage: str) -> Path:
         return self._mkdir("figures", stage)

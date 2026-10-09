@@ -33,7 +33,7 @@ Inputs (defaults, overridable with `--nicfi-dir/--s2-dir/--data-root`):
 `<data-root>/<TILE>/*YYYY-MM.tif` (NICFI) and optionally
 `<data-root>/<TILE>_S2/YYYY-MM-DD.tif` (raw Sentinel-2, band descriptions
 B2..B12). Outputs in `outputs/nicfirecon/<TILE>/`: `cache/`,
-`reconstructed/<method>/`, `composites/{annual,typical_year}/<source>/`,
+`reconstructed/<method>/`, `composites/{annual,typical_year}/<stat>/<source>/`,
 `figures/{1_cloudmask,2_reconstruct,3_composite}/`. Every product
 GeoTIFF has named bands and a `_quality.tif` next to it.
 
@@ -43,7 +43,7 @@ GeoTIFF has named bands and a `_quality.tif` next to it.
 |---|---|---|
 | `1_cloudmask/` | `mask_stats.png`, `postcheck_frequency.png`, `mask_effect_<year>.png`, `s2_coverage.png` | NICFI cloud classes per month, raw OCM vs post-checked; where and how often the post-check clears flags; example windows before/after; S2 composite coverage |
 | `2_reconstruct/` | `sources_by_month.png`, `harmonization.png`, `compare_<year>.png`, `compare_full_tile.png` | the three methods side by side on the same cloudy months, each with its quality-source map |
-| `3_composite/` | `typical_year.png`, `annual.png`, `coverage.png`, `area_<year>_*.png` | the raw-NICFI composites as reference, then each method's relative-difference map (side by side the composites look near-identical; the differences are where the methods matter) |
+| `3_composite/` | `monthly_vs_reference.png`, `annual_median.png` | at ~6 cloud-affected sites (most thick cloud + shadow): original NICFI, the typical-year composite of the same calendar month as a cloud-free reference, and each method's monthly product; then the typical-year annual median vs each method's annual median composite (`--stat median --min-score 40`) |
 
 ## D17 results by method (`configs/D17.yaml`, 42 min end to end on one RTX 3090)
 
@@ -81,6 +81,15 @@ Mean over 60 months, % of the tile by data source (from each method's
   2-7%, except `phenology` 2024 (14%, the south of the tile around the
   fire-smoke months). The reconstruction methods matter most for single
   months and for wet-season typical-year months.
+- **Monthly products at cloud-affected sites** (`monthly_vs_reference.png`):
+  `mask` leaves holes (39-93% of the 6 windows); `s2fill` fills most of
+  them but leaves gaps where S2 was cloudy too (up to 23%) and can bring in
+  hazy S2 (2024-02); `phenology` always fills and is closest in texture to
+  the typical-year reference, but washes out under near-total cloud.
+- **Annual medians** (`annual_median.png`) are nearly identical across
+  methods and hazier/bluer than the typical-year reference, especially in
+  2024: a plain median includes hazy months that are classed clear, which
+  the least-hazy rule (`--stat lowblue`) avoids.
 - Found during the refactor: the S2 haze-test blue references were cached
   once and never rebuilt, so they still reflected the raw masks after the
   post-check changed them; `s2composite` now rebuilds them every run. The
@@ -222,12 +231,11 @@ pixel cloudy in one year is usually clear in another.
 - Fallbacks, per pixel (`_quality.tif` band `tier`): clear same month ->
   clear adjacent months -> least-contaminated same-month observation.
 
-Outputs: `composites/typical_year/<source>/<tile>_m<MM>.tif` + `_quality.tif`
+Outputs: `composites/typical_year/<stat>/<source>/<tile>_m<MM>.tif` + `_quality.tif`
 (tier, n_usable_same, n_usable_adjacent) for every source -- raw NICFI
 (described here) or any method's monthly output (same rules, usable =
-quality score >= `--min-score`); figures in `figures/3_composite/` compare
-the sources side by side (`typical_year.png`, `annual.png`, `coverage.png`,
-and per example area `area_*.png`).
+quality score >= `--min-score`). The `figures/3_composite/` figures use the
+raw-NICFI typical year as the cloud-free reference.
 
 **D17:** every calendar month is 98.8-98.9% filled from clear same-month
 observations (the remaining ~1.05% is the tile-edge nodata border; adjacent

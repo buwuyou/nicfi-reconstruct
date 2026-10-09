@@ -19,13 +19,12 @@ post-checked NICFI masks (cache/example_windows.json).
     compare_<year>.png       example windows: original NICFI (+ mask) and
                              each method's result, its quality source below
     compare_full_tile.png    the most contaminated months, whole tile
-3_composite/
-    typical_year.png         12 monthly composites from raw NICFI (reference),
-                             then each method's relative difference from it
-    annual.png               the same for the annual composites
-    coverage.png             per source, % of tile from usable observations
-    area_<year>_r<row>_c<col>.png  one example area: reference typical year +
-                             annual, then each method's difference maps
+3_composite/              at ~6 cloud-affected sites (most thick cloud + shadow):
+    monthly_vs_reference.png original NICFI | typical-year composite of the
+                             same calendar month (reference) | each method's
+                             monthly product
+    annual_median.png        typical-year annual median (reference) | each
+                             method's annual median composite
 """
 import json
 from collections import defaultdict
@@ -251,10 +250,6 @@ def _methods(tile):
     return [m for m in rc.METHODS if (tile.recon_dir(m) / "stats.json").exists()]
 
 
-def _sources(tile, kind):
-    return [s for s in cp.SOURCES if (tile.composite_dir(kind, s) / "stats.json").exists()]
-
-
 # ------------------------------------------------------------- 1 cloud mask
 def _mask_month_stats(tile):
     rows = {}
@@ -442,154 +437,98 @@ def fig_compare_full_tile(tile, methods, mask_st, out_dir, n=2):
 
 
 # -------------------------------------------------------------- 3 composite
-def _composite_paths(tile, kind, source):
-    d = tile.composite_dir(kind, source)
-    keys = [f"m{k:02d}" for k in range(1, 13)] if kind == "typical_year" else tile.years
-    return {k: d / f"{tile.tile_id}_{k}.tif" for k in keys if (d / f"{tile.tile_id}_{k}.tif").exists()}
+REF_STAT = "lowblue"      # the typical-year reference, built with the default rule
+ANNUAL_STAT = "median"    # annual composites compared across methods
+N_SITES = 6
 
 
-DIFF_VMAX = 20.0      # % colour scale of the difference maps
-DIFF_THRESH = 5.0     # % above which a pixel counts as "different" in panel titles
+def _comp_path(tile, kind, stat, source, key):
+    return tile.out_root / "composites" / kind / stat / source / f"{tile.tile_id}_{key}.tif"
 
 
-def rel_diff(a, ref):
-    """Per-pixel mean |a - ref| over the 4 bands, relative to ref's mean
-    brightness, in %; NaN where ref has no data."""
-    num = np.abs(a[:4].astype(np.float32) - ref[:4]).mean(0)
-    den = ref[:4].astype(np.float32).mean(0)
-    with np.errstate(invalid="ignore", divide="ignore"):
-        return np.where(np.all(ref[:4] > 0, axis=0), 100 * num / den, np.nan)
-
-
-def _reference(sources):
-    return "nicfi" if "nicfi" in sources else sources[0]
-
-
-def _diff_cmap():
-    cmap = plt.get_cmap("Blues").copy()
-    cmap.set_bad("#0b0b0b")
-    return cmap
-
-
-def _grid_figure(tile, kind, sources, title, path, step=6):
-    """Row 1: the reference composites (raw NICFI). Then, per other source,
-    a map of its relative difference from the reference -- the composites
-    themselves look near-identical side by side, the differences don't."""
-    imgs = {s: {k: io_utils.read_full(p)[0][:, ::step, ::step]
-                for k, p in _composite_paths(tile, kind, s).items()} for s in sources}
-    ref = _reference(sources)
-    others = [s for s in sources if s != ref]
-    keys = sorted(imgs[ref])
-    lims = lims_stack(np.stack(list(imgs[ref].values())))
-    fig, axes = plt.subplots(1 + len(others), len(keys), squeeze=False,
-                             figsize=(2.3 * len(keys), 2.55 * (1 + len(others)) + 1.0))
-    label = (lambda k: MONTH_ABBR[int(k[1:]) - 1]) if kind == "typical_year" else (lambda k: k)
-    for j, k in enumerate(keys):
-        axes[0, j].imshow(rgb(imgs[ref][k], lims))
-        axes[0, j].set_title(label(k), fontsize=11)
-        for i, s in enumerate(others, start=1):
-            if k not in imgs[s]:
-                continue
-            d = rel_diff(imgs[s][k], imgs[ref][k])
-            im = axes[i, j].imshow(d, cmap=_diff_cmap(), vmin=0, vmax=DIFF_VMAX, interpolation="nearest")
-            axes[i, j].set_title(f"{np.nanmean(d > DIFF_THRESH):.1%} > {DIFF_THRESH:g}%", fontsize=8.5,
-                                 color=INK)
-    axes[0, 0].set_ylabel(f"{SOURCE_LABEL[ref]}\n(reference)", fontsize=10, color=INK)
-    for i, s in enumerate(others, start=1):
-        axes[i, 0].set_ylabel(f"{s}\nvs reference", fontsize=10, color=INK)
-    _noticks(axes)
-    if others:
-        cb = fig.colorbar(im, ax=axes[1:, :].ravel().tolist(), orientation="horizontal",
-                          fraction=0.03, pad=0.04, aspect=70)
-        cb.set_label("relative difference from the reference composite, % (mean |Δ| over bands / "
-                     "reference brightness)", fontsize=9)
-    fig.suptitle(title, fontsize=13)
-    return _save(fig, path, 80)
-
-
-def fig_coverage(tile, ty_sources, an_sources, out_dir):
-    fig, axes = plt.subplots(1, 2, figsize=(16, 4.4), gridspec_kw=dict(width_ratios=[2.2, 1]))
-    cols = dict(zip(cp.SOURCES, (INK, C8, C1, C7)))
-    for s in ty_sources:
-        st = json.loads((tile.composite_dir("typical_year", s) / "stats.json").read_text())["months"]
-        ks = sorted(int(k) for k in st)
-        axes[0].plot(ks, [100 * st[str(k)]["same"] for k in ks], color=cols[s], lw=2, marker="o", ms=6,
-                     ls="--" if s == "nicfi" else "-", label=SOURCE_LABEL[s])
-    axes[0].set_xticks(range(1, 13)); axes[0].set_xticklabels(MONTH_ABBR)
-    axes[0].set_ylabel("% of tile from usable same-month obs", color=INK)
-    axes[0].set_ylim(90, 100.5)
-    axes[0].set_title("typical year", fontsize=12, loc="left")
-    axes[0].legend(frameon=False, fontsize=9)
-    tidy(axes[0])
-    for s in an_sources:
-        st = json.loads((tile.composite_dir("annual", s) / "stats.json").read_text())["years"]
-        ys = sorted(st)
-        axes[1].plot(ys, [st[y]["mean_months_used"] for y in ys], color=cols[s], lw=2, marker="o", ms=6,
-                     ls="--" if s == "nicfi" else "-", label=SOURCE_LABEL[s])
-    axes[1].set_ylabel("usable months per pixel (of 12)", color=INK)
-    axes[1].set_ylim(0, 12.5)
-    axes[1].set_title("annual", fontsize=12, loc="left")
-    axes[1].legend(frameon=False, fontsize=9)
-    tidy(axes[1])
-    fig.suptitle(f"{tile.tile_id}: how much usable data (score >= threshold) each composite rests on "
-                 "(raw NICFI and mask coincide by construction; ~1% of the tile is nodata border)",
-                 fontsize=12)
-    fig.tight_layout()
-    return _save(fig, out_dir / "coverage.png", 110)
-
-
-def fig_composite_areas(tile, ty_sources, an_sources, out_dir):
-    """Per example area: the reference (raw NICFI) typical-year and annual
-    composites, then each other source's relative difference from them."""
-    sources = [s for s in cp.SOURCES if s in ty_sources or s in an_sources]
-    ref = _reference(sources)
-    others = [s for s in sources if s != ref]
-    chosen = {}
+def composite_sites(tile, n=N_SITES):
+    """The example windows with the most *thick* cloud + shadow (thin-cloud
+    flags alone are often just haze or over-calls), at distinct locations."""
+    scored = []
     for w in example_windows(tile):
-        chosen.setdefault(w["month"][:4], w)
-    mk, yk = [f"m{k:02d}" for k in range(1, 13)], tile.years
-    paths = []
-    for year, w in sorted(chosen.items()):
-        load = lambda kind, src: {k: _crop(io_utils.read_full(p)[0], w)
-                                  for k, p in _composite_paths(tile, kind, src).items()}
-        ty = {s: load("typical_year", s) for s in ty_sources}
-        an = {s: load("annual", s) for s in an_sources}
-        refs = list(ty.get(ref, {}).values()) + list(an.get(ref, {}).values())
-        lims = lims_stack(np.stack(refs))
-        ncol = len(mk) + 1 + len(yk)
-        nrow = 1 + len(others)
-        fig, axes = plt.subplots(nrow, ncol, figsize=(1.9 * ncol, 2.05 * nrow + 1.4), squeeze=False,
-                                 gridspec_kw=dict(wspace=0.04, hspace=0.18, left=0.06, right=0.995,
-                                                  top=0.86, bottom=0.14))
-        im = None
-        for block, keys, offset in ((ty, mk, 0), (an, yk, len(mk) + 1)):
-            for j, k in enumerate(keys, start=offset):
-                if k in block.get(ref, {}):
-                    axes[0, j].imshow(rgb(block[ref][k], lims), interpolation="nearest")
-                axes[0, j].set_title(MONTH_ABBR[j] if offset == 0 else k, fontsize=10)
-                for i, s in enumerate(others, start=1):
-                    if k in block.get(s, {}) and k in block.get(ref, {}):
-                        d = rel_diff(block[s][k], block[ref][k])
-                        im = axes[i, j].imshow(d, cmap=_diff_cmap(), vmin=0, vmax=DIFF_VMAX,
-                                               interpolation="nearest")
-        for i in range(nrow):
-            axes[i, len(mk)].axis("off")
-        axes[0, 0].set_ylabel(f"{SOURCE_LABEL[ref]}\n(reference)", fontsize=9, color=INK)
-        for i, s in enumerate(others, start=1):
-            axes[i, 0].set_ylabel(f"{s}\nvs reference", fontsize=9, color=INK)
-        _noticks(axes)
-        if im is not None:
-            cb = fig.colorbar(im, ax=axes[1:, :].ravel().tolist(), orientation="horizontal",
-                              fraction=0.05, pad=0.08, aspect=80)
-            cb.set_label("relative difference from the reference composite, %", fontsize=9)
-        fig.text(0.06 + 0.94 * len(mk) / ncol / 2, 0.95, "typical year (12 months, all years)",
-                 ha="center", fontsize=12, weight="bold", color=C2)
-        fig.text(0.06 + 0.94 * (len(mk) + 1 + len(yk) / 2) / ncol, 0.95, "annual", ha="center",
-                 fontsize=12, weight="bold", color=C2)
-        fig.suptitle(f"{tile.tile_id} area r{w['r0']} c{w['c0']} (~{w['win'] * 4.77 / 1000:.1f} km): "
-                     "reference composites and how much each method changes them", fontsize=13, y=0.995)
-        paths.append(_save(fig, out_dir / f"area_{year}_r{w['r0']}_c{w['c0']}.png", 80))
-    return paths
+        q = _crop(masking.load_nicfi_classes(tile, w["month"]), w)
+        scored.append((float(np.isin(q, (cloud_mask.CLOUD_THICK, cloud_mask.SHADOW)).mean()), w))
+    picked = []
+    for frac, w in sorted(scored, key=lambda t: -t[0]):
+        if all(abs(w["r0"] - p["r0"]) >= WIN or abs(w["c0"] - p["c0"]) >= WIN for p in picked):
+            picked.append({**w, "thick_frac": round(frac, 3)})
+        if len(picked) == n:
+            break
+    return sorted(picked, key=lambda w: w["month"])
+
+
+def _site_label(w):
+    return f"{w['month']}\nr{w['r0']} c{w['c0']}"
+
+
+def fig_monthly_vs_reference(tile, sites, methods, out_dir):
+    """Per cloudy site-month: the original NICFI, the typical-year composite
+    of that calendar month (cloud-free reference), and each method's
+    monthly product."""
+    cols = ["original NICFI", "reference: typical-year\ncomposite, same month"] + methods
+    fig, axes = plt.subplots(len(sites), len(cols), figsize=(3.6 * len(cols), 3.75 * len(sites) + 0.8),
+                             squeeze=False)
+    for i, w in enumerate(sites):
+        m = w["month"]
+        ref = _crop(io_utils.read_full(_comp_path(tile, "typical_year", REF_STAT, "nicfi",
+                                                  f"m{m[5:]}"))[0], w)
+        lims = lims_from(ref)
+        nicfi = _crop(io_utils.read_full(tile.nicfi_path(m))[0], w)
+        axes[i, 0].imshow(rgb(nicfi, lims), interpolation="nearest")
+        axes[i, 1].imshow(rgb(ref, lims), interpolation="nearest")
+        for j, method in enumerate(methods, start=2):
+            data, q = _load_recon(tile, method, m)
+            d, src = _crop(data, w), _crop(q[0], w)
+            axes[i, j].imshow(rgb(d[:4], lims), interpolation="nearest")
+            changed = np.isin(src, (rc.SRC_S2_SINGLE, rc.SRC_S2_MEDIAN, rc.SRC_PHENO,
+                                    rc.SRC_PHENO_BLEND)).mean()
+            note = (f"masked {(src == rc.SRC_CONTAMINATED).mean():.0%}" if method == "mask"
+                    else f"filled {changed:.0%}, left {(src == rc.SRC_CONTAMINATED).mean():.0%}")
+            axes[i, j].set_xlabel(note, fontsize=9, color=INK)
+        axes[i, 0].set_ylabel(_site_label(w), fontsize=10, color=INK)
+    for j, c in enumerate(cols):
+        axes[0, j].set_title(c, fontsize=11, weight="bold" if j >= 2 else "normal")
+    _noticks(axes)
+    fig.suptitle(f"{tile.tile_id}: monthly products at cloud-affected sites vs. the typical-year reference "
+                 "(shared stretch per row, from the reference; black = nodata)", fontsize=13)
+    fig.tight_layout(rect=(0, 0, 1, 0.98))
+    return _save(fig, out_dir / "monthly_vs_reference.png", 85)
+
+
+def fig_annual_median(tile, sites, methods, out_dir):
+    """Per site, in the year of its cloudy month: the typical-year annual
+    median (median of the 12 typical-year months, reference) and each
+    method's annual median composite."""
+    cols = ["reference: typical-year\nannual median"] + methods
+    fig, axes = plt.subplots(len(sites), len(cols), figsize=(3.6 * len(cols), 3.75 * len(sites) + 0.8),
+                             squeeze=False)
+    for i, w in enumerate(sites):
+        year = w["month"][:4]
+        months = [_crop(io_utils.read_full(_comp_path(tile, "typical_year", REF_STAT, "nicfi",
+                                                      f"m{k:02d}"))[0], w).astype(np.float32)
+                  for k in range(1, 13)]
+        stack = np.stack(months)
+        ref = np.median(np.where(stack > 0, stack, np.nan), axis=0)
+        ref = np.nan_to_num(ref)
+        lims = lims_from(ref)
+        axes[i, 0].imshow(rgb(ref, lims), interpolation="nearest")
+        for j, method in enumerate(methods, start=1):
+            path = _comp_path(tile, "annual", ANNUAL_STAT, method, year)
+            if path.exists():
+                axes[i, j].imshow(rgb(_crop(io_utils.read_full(path)[0], w), lims), interpolation="nearest")
+        axes[i, 0].set_ylabel(f"{year}\nr{w['r0']} c{w['c0']}", fontsize=10, color=INK)
+    for j, c in enumerate(cols):
+        axes[0, j].set_title(c, fontsize=11, weight="bold" if j >= 1 else "normal")
+    _noticks(axes)
+    fig.suptitle(f"{tile.tile_id}: annual median composites by method at the same sites vs. the "
+                 "typical-year reference (shared stretch per row)", fontsize=13)
+    fig.tight_layout(rect=(0, 0, 1, 0.98))
+    return _save(fig, out_dir / "annual_median.png", 85)
 
 
 # ------------------------------------------------------------------- runner
@@ -611,19 +550,15 @@ def run_visualize(tile: cfg.Tile, what: str = "all", log=print):
             paths += fig_compare(tile, methods, out)
             paths.append(fig_compare_full_tile(tile, methods, _mask_month_stats(tile), out))
     if what in ("composite", "all"):
-        ty, an = _sources(tile, "typical_year"), _sources(tile, "annual")
-        if ty or an:
+        methods = _methods(tile)
+        ref_ok = _comp_path(tile, "typical_year", REF_STAT, "nicfi", "m01").exists()
+        if methods and ref_ok:
             out = tile.fig_dir("3_composite")
-            if ty:
-                paths.append(_grid_figure(tile, "typical_year", ty, f"{tile.tile_id}: typical-year "
-                                          "composites -- reference, and how much each method changes it",
-                                          out / "typical_year.png"))
-            if an:
-                paths.append(_grid_figure(tile, "annual", an, f"{tile.tile_id}: annual composites -- "
-                                          "reference, and how much each method changes it",
-                                          out / "annual.png", step=4))
-            paths.append(fig_coverage(tile, ty, an, out))
-            paths += fig_composite_areas(tile, ty, an, out)
+            sites = composite_sites(tile)
+            (tile.cache_dir / "composite_sites.json").write_text(json.dumps(sites, indent=1))
+            paths.append(fig_monthly_vs_reference(tile, sites, methods, out))
+            if any(_comp_path(tile, "annual", ANNUAL_STAT, m, tile.years[0]).exists() for m in methods):
+                paths.append(fig_annual_median(tile, sites, methods, out))
     for p in paths:
         if p:
             log(f"  -> {p.relative_to(tile.out_root)}")

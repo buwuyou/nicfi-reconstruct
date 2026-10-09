@@ -10,12 +10,8 @@ reconstruct:                         # one product per method, reconstructed/<me
   - {method: s2fill, add_s2_bands: true}
   - {method: phenology, device: cuda}
 
-composite:                           # typical year + annual from raw NICFI and from every method
-  - {type: typical-year, source: nicfi}
-  - {type: typical-year, source: mask}
-  - {type: typical-year, source: s2fill}
-  - {type: typical-year, source: phenology}
-  - {type: annual, source: nicfi}
-  - {type: annual, source: mask}
-  - {type: annual, source: s2fill}
-  - {type: annual, source: phenology}
+composite:                           # outputs in composites/<type>/<stat>/<source>/
+  - {type: typical-year, source: nicfi}                       # the reference for the figures
+  - {type: annual, source: mask,      stat: median, min_score: 40}
+  - {type: annual, source: s2fill,    stat: median, min_score: 40}
+  - {type: annual, source: phenology, stat: median, min_score: 40}   # 40: keeps phenology's model values (score 45)

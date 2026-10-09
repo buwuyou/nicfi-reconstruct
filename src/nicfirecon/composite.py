@@ -190,7 +190,7 @@ def run_typical_year(tile: cfg.Tile, source: str = "nicfi", stat: str = "lowblue
     an observation is usable if its score >= min_score."""
     if source not in SOURCES:
         raise ValueError(f"source must be one of {SOURCES}")
-    out_dir = tile.composite_dir("typical_year", source)
+    out_dir = tile.composite_dir("typical_year", source, stat)
     by_cal = defaultdict(list)
     for m in tile.all_months:
         by_cal[int(m[5:])].append(m)
@@ -258,7 +258,7 @@ def run_annual(tile: cfg.Tile, source: str = "s2fill", stat: str = "lowblue",
                min_score: int = 50, log=print) -> Dict:
     if source not in SOURCES:
         raise ValueError(f"source must be one of {SOURCES}")
-    out_dir = tile.composite_dir("annual", source)
+    out_dir = tile.composite_dir("annual", source, stat)
     stats = {}
     for year in tile.years:
         months = [m for m in tile.months if m.startswith(year)]
