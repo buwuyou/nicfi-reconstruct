@@ -38,10 +38,20 @@ def _log(msg):
 
 
 def do_download(tile, start, end, sensors=("nicfi", "s2"), bbox=None, aoi=None, aoi_id_field=None,
-                ee_project=None, nicfi_region=None, s2_max_cloud=100.0):
+                ee_project=None, nicfi_region=None, s2_max_cloud=100.0, grid=None, grid_id=None,
+                grid_id_field="id", naming="pipeline", format="tif", jp2="lossless"):
+    if naming == "archive":
+        if grid_id is None:
+            raise ValueError("--naming archive needs --grid/--grid-id (col,row ids)")
+        c, r = (int(v) for v in str(grid_id).split(","))
+        tile.nicfi_pattern = download.grid_nicfi_pattern(c, r, "jp2" if format == "jp2" else "tif")
     _log(f"download {start}..{end}: {', '.join(sensors)}")
-    download.run_download(tile, start, end, sensors, bbox, Path(aoi) if aoi else None, aoi_id_field,
-                          ee_project, nicfi_region, s2_max_cloud, _log)
+    download.run_download(tile, str(start), str(end), sensors, bbox, Path(aoi) if aoi else None,
+                          aoi_id_field, ee_project, nicfi_region, s2_max_cloud,
+                          Path(grid) if grid else None, grid_id, grid_id_field, format, jp2, _log)
+    if tile.nicfi_pattern != cfg.DEFAULT_NICFI_PATTERN:
+        _log(f"pipeline input for this tile: --tile {tile.tile_id} --nicfi-dir {tile.nicfi_dir} "
+             f"--nicfi-pattern '{tile.nicfi_pattern}'")
 
 
 def do_preprocess(tile, steps=("mask", "postcheck", "s2composite"), sensors=None, device="cuda",
@@ -132,7 +142,8 @@ def main(argv=None):
                                  formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
 
-    p = cfg.add_tile_args(sub.add_parser("download", help="NICFI (+ Sentinel-2) from Earth Engine"))
+    p = cfg.add_tile_args(sub.add_parser("download", help="NICFI (+ Sentinel-2) from Earth Engine"),
+                          tile_required=False)
     p.add_argument("--start", required=True, help="first month, YYYY-MM")
     p.add_argument("--end", required=True, help="last month, YYYY-MM")
     p.add_argument("--sensors", default="nicfi,s2", help="nicfi,s2 or nicfi")
@@ -144,6 +155,14 @@ def main(argv=None):
                    help="NICFI basemap (default: from the AOI's longitude)")
     p.add_argument("--s2-max-cloud", type=float, default=100.0,
                    help="skip S2 scenes above this CLOUDY_PIXEL_PERCENTAGE (default: keep all)")
+    p.add_argument("--grid", type=Path, help="grid file with tile polygons, e.g. all_grids_1deg_lc.geojson")
+    p.add_argument("--grid-id", help='tile id in --grid, e.g. "33,0" (col,row)')
+    p.add_argument("--grid-id-field", default="id")
+    p.add_argument("--naming", default="pipeline", choices=("pipeline", "archive"),
+                   help="archive: nicfi_<YYYY-MM>-01_<col:05d>_<row:05d> like the NICFI archives")
+    p.add_argument("--format", default="tif", choices=("tif", "jp2"),
+                   help="jp2: convert each month to JPEG2000 and delete the GeoTIFF")
+    p.add_argument("--jp2", default="lossless", choices=("lossless", "lossy"))
 
     p = cfg.add_tile_args(sub.add_parser("preprocess", help="cloud masks, post-check, S2 composites"))
     p.add_argument("--steps", default="mask,postcheck,s2composite")
@@ -183,11 +202,17 @@ def main(argv=None):
     a = ap.parse_args(argv)
     if a.cmd == "run":
         return do_run(a.config)
+    if a.cmd == "download" and a.tile is None:
+        if not a.grid_id:
+            ap.error("download needs --tile, or --grid-id to name the tile")
+        c, r = (int(v) for v in a.grid_id.split(","))
+        a.tile = f"{c:05d}_{r:05d}"
     tile = cfg.tile_from_args(a)
     t0 = time.time()
     if a.cmd == "download":
         return do_download(tile, a.start, a.end, a.sensors.split(","), a.bbox, a.aoi, a.aoi_id_field,
-                           a.ee_project, a.nicfi_region, a.s2_max_cloud)
+                           a.ee_project, a.nicfi_region, a.s2_max_cloud, a.grid, a.grid_id,
+                           a.grid_id_field, a.naming, a.format, a.jp2)
     _log(f"{tile.tile_id}: {len(tile.months)} NICFI months, "
          f"{len(tile.s2_frames())} S2 frames -> {tile.out_root}")
     if a.cmd == "preprocess":

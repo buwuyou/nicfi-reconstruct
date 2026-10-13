@@ -41,7 +41,13 @@ NICFI_TO_S2_BAND = {"blue": "B2", "green": "B3", "red": "B4", "nir": "B8"}
 # S2 bands NICFI has no counterpart for (optional extra output bands)
 S2_EXTRA_BANDS = ["B5", "B6", "B7", "B8A", "B11", "B12"]
 
-_MONTH_RE = re.compile(r"(\d{4}-\d{2})\.tif$")
+DEFAULT_NICFI_PATTERN = "*{month}.tif"
+
+
+def _pattern_regex(pattern: str):
+    """'nicfi_{month}-01_00033_00000.jp2' -> regex capturing the month."""
+    rx = re.escape(pattern).replace(re.escape("{month}"), r"(\d{4}-\d{2})").replace(r"\*", ".*")
+    return re.compile(rx + "$")
 _DATE_RE = re.compile(r"^(\d{4}-\d{2}-\d{2})\.tif$")
 
 
@@ -52,11 +58,15 @@ class Tile:
     s2_dir: Path
     month_filter: Optional[List[str]] = None  # prefixes, e.g. ["2023", "2024-05"]
     out_base: Path = PROJECT_DIR / "outputs" / PIPELINE_NAME
+    # NICFI filename pattern, {month} = YYYY-MM; '*' allowed. A folder shared
+    # by many tiles uses e.g. "nicfi_{month}-01_00033_00000.jp2".
+    nicfi_pattern: str = DEFAULT_NICFI_PATTERN
 
     @property
     def months(self) -> List[str]:
-        found = sorted({m.group(1) for p in self.nicfi_dir.glob("*.tif")
-                        if (m := _MONTH_RE.search(p.name))})
+        rx = _pattern_regex(self.nicfi_pattern)
+        found = sorted({m.group(1) for p in self.nicfi_dir.glob("*")
+                        if (m := rx.fullmatch(p.name))}) if self.nicfi_dir.is_dir() else []
         if self.month_filter:
             found = [m for m in found if any(m.startswith(f) for f in self.month_filter)]
         return found
@@ -65,14 +75,15 @@ class Tile:
     def all_months(self) -> List[str]:
         """Every NICFI month on disk, ignoring --months (for steps that need
         the whole series, e.g. the temporal post-check and composites)."""
-        return Tile(self.tile_id, self.nicfi_dir, self.s2_dir, None, self.out_base).months
+        return Tile(self.tile_id, self.nicfi_dir, self.s2_dir, None, self.out_base,
+                    self.nicfi_pattern).months
 
     @property
     def years(self) -> List[str]:
         return sorted({m[:4] for m in self.months})
 
     def nicfi_path(self, month: str) -> Path:
-        hits = sorted(self.nicfi_dir.glob(f"*{month}.tif"))
+        hits = sorted(self.nicfi_dir.glob(self.nicfi_pattern.format(month=month)))
         if len(hits) != 1:
             raise FileNotFoundError(f"expected exactly one NICFI file for {month} in "
                                     f"{self.nicfi_dir}, found {[h.name for h in hits]}")
@@ -111,8 +122,8 @@ class Tile:
         return self._mkdir("figures", stage)
 
 
-def add_tile_args(ap: argparse.ArgumentParser) -> argparse.ArgumentParser:
-    ap.add_argument("--tile", required=True, help="tile ID, e.g. D17")
+def add_tile_args(ap: argparse.ArgumentParser, tile_required: bool = True) -> argparse.ArgumentParser:
+    ap.add_argument("--tile", required=tile_required, help="tile ID, e.g. D17")
     ap.add_argument("--data-root", type=Path, default=DEFAULT_DATA_ROOT)
     ap.add_argument("--nicfi-dir", type=Path, default=None,
                     help="default: <data-root>/<tile>")
@@ -121,6 +132,9 @@ def add_tile_args(ap: argparse.ArgumentParser) -> argparse.ArgumentParser:
     ap.add_argument("--months", nargs="*", default=None,
                     help="only months starting with these prefixes, e.g. 2023 2024-05")
     ap.add_argument("--out-base", type=Path, default=PROJECT_DIR / "outputs" / PIPELINE_NAME)
+    ap.add_argument("--nicfi-pattern", default=DEFAULT_NICFI_PATTERN,
+                    help="NICFI filename pattern, {month}=YYYY-MM, e.g. "
+                         "'nicfi_{month}-01_00033_00000.jp2' (default: '*{month}.tif')")
     return ap
 
 
@@ -131,4 +145,5 @@ def tile_from_args(args) -> Tile:
         s2_dir=args.s2_dir or args.data_root / f"{args.tile}_S2",
         month_filter=args.months,
         out_base=args.out_base,
+        nicfi_pattern=getattr(args, "nicfi_pattern", DEFAULT_NICFI_PATTERN),
     )
