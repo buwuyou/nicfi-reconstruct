@@ -196,15 +196,18 @@ def download_image(image, crs: str, transform: Affine, width: int, height: int,
 def to_jp2(tif: Path, jp2: Path, mode: str = "lossless", log=None):
     """GeoTIFF -> JPEG2000 (GDAL JP2OpenJPEG via rasterio), then delete the GeoTIFF.
     lossless: reversible 5/3 wavelet, verified pixel-for-pixel on sample
-    windows before the GeoTIFF is removed. lossy: irreversible, QUALITY=25
-    (much smaller, like the existing NICFI .jp2 archives -- not exact)."""
+    windows before the GeoTIFF is removed. lossy: irreversible, QUALITY=80,
+    the settings of the existing archive conversions -- smaller, not exact.
+    Both with 6 resolution levels (built-in overviews)."""
     from rasterio.shutil import copy as rio_copy
     tmp = jp2.with_name(jp2.stem + ".part.jp2")  # must end in .jp2, see below
+    # lossy = the settings of the existing archive conversions
+    # (/nfs/Planet/NICFI/convert_jp2_tree_explorer.py): QUALITY 80, irreversible
     co = dict(REVERSIBLE="YES", QUALITY="100", YCBCR420="NO") if mode == "lossless" else \
-        dict(REVERSIBLE="NO", QUALITY="25", YCBCR420="NO")
+        dict(REVERSIBLE="NO", QUALITY="80", YCBCR420="NO")
     # rasterio's bundled GDAL has the OpenJPEG driver (the conda gdal_translate here doesn't)
     rio_copy(str(tif), str(tmp), driver="JP2OpenJPEG", BLOCKXSIZE="1024", BLOCKYSIZE="1024",
-             NUM_THREADS="ALL_CPUS", **co)
+             RESOLUTIONS="6", NUM_THREADS="ALL_CPUS", **co)
     with rasterio.open(tif) as a, rasterio.open(tmp) as b:
         if (a.width, a.height, a.count) != (b.width, b.height, b.count):
             raise RuntimeError(f"{jp2.name}: JP2 shape differs from the GeoTIFF -- kept both")
