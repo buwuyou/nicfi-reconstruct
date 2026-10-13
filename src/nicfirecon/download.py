@@ -59,13 +59,26 @@ MAX_RETRIES = 3
 
 
 def init_ee(project: Optional[str]):
+    """Initialize Earth Engine. If the stored login is rejected because the
+    library's default OAuth scopes don't match what the account granted
+    ("invalid_scope" -- seen after re-authenticating with another account),
+    fall back to the same stored refresh token without requesting scopes."""
     import ee
     try:
         ee.Initialize(project=project) if project else ee.Initialize()
-    except Exception as exc:
-        raise RuntimeError(f"Earth Engine init failed ({exc}). Run `earthengine authenticate` "
-                           "once and pass --ee-project <your cloud project>.") from exc
-    return ee
+        return ee
+    except Exception as first:
+        try:
+            import google.oauth2.credentials
+            stored = json.loads((Path.home() / ".config/earthengine/credentials").read_text())
+            creds = google.oauth2.credentials.Credentials(
+                None, refresh_token=stored["refresh_token"], client_id=stored.get("client_id"),
+                client_secret=stored.get("client_secret"), token_uri="https://oauth2.googleapis.com/token")
+            ee.Initialize(credentials=creds, project=project)
+            return ee
+        except Exception:
+            raise RuntimeError(f"Earth Engine init failed ({first}). Run `earthengine authenticate` "
+                               "once and pass --ee-project <your cloud project>.") from first
 
 
 # ------------------------------------------------------------------- AOI
